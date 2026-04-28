@@ -1,0 +1,673 @@
+/* === Animations golf === */
+
+@keyframes flag-wave {
+  0%, 100% { transform: skewY(0deg) scaleX(1); }
+  25%      { transform: skewY(-2deg) scaleX(0.97); }
+  50%      { transform: skewY(2deg) scaleX(0.93); }
+  75%      { transform: skewY(-1deg) scaleX(0.96); }
+}
+.flag-anim {
+  animation: flag-wave 2.6s ease-in-out infinite;
+  transform-origin: 5px 4px;
+  transform-box: fill-box;
+}
+
+@keyframes confetti-fall {
+  0%   { transform: translate3d(0, -20vh, 0) rotate(0deg); opacity: 1; }
+  100% { transform: translate3d(var(--dx, 0px), 110vh, 0) rotate(720deg); opacity: 0.3; }
+}
+.confetti {
+  position: fixed;
+  top: 0;
+  width: 9px;
+  height: 14px;
+  z-index: 9999;
+  pointer-events: none;
+  animation: confetti-fall var(--d, 2.6s) linear forwards;
+  border-radius: 1px;
+}
+
+@keyframes card-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pop {
+  0%   { transform: scale(0.7); }
+  60%  { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+.pop { animation: pop 0.32s ease-out; }
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flag-anim, .confetti, .card, .pop { animation: none !important; }
+}
+
+/* === Theme golf : fairway, parchemin et or === */
+:root {
+  --green-deep: #1a4d2e;       /* Vert profond - couleur principale */
+  --green-fairway: #2d6a3e;    /* Vert fairway - hover/secondaire */
+  --green-rough: #6b8e4e;      /* Vert rough - accent */
+  --green-light: #d8e9d3;      /* Vert clair - bg subtil */
+  --cream: #faf6e9;            /* Parchemin - cards alt */
+  --paper: #ffffff;            /* Blanc carte */
+  --gold: #c9a961;             /* Or - trophees, accents */
+  --gold-soft: #e6d5a8;        /* Or clair */
+  --sand: #d4c79a;             /* Sable bunker */
+  --text-dark: #1a2419;
+  --text-muted: #6b7768;
+  --water: #2c5f7c;            /* Bleu eau (penalite) */
+  --shadow: 0 2px 8px rgba(26, 77, 46, 0.12);
+  --shadow-deep: 0 4px 16px rgba(26, 77, 46, 0.18);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background:
+    radial-gradient(ellipse at top, var(--green-light) 0%, transparent 60%),
+    linear-gradient(180deg, #f5f1e0 0%, #ebe3c8 100%);
+  background-attachment: fixed;
+  color: var(--text-dark);
+  -webkit-tap-highlight-color: transparent;
+  min-height: 100vh;
+}
+
+body {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px 14px 80px;
+}
+
+/* === Typography === */
+
+h1, h2, h3 {
+  font-family: Georgia, "Times New Roman", serif;
+  color: var(--green-deep);
+  letter-spacing: 0.3px;
+}
+h1 {
+  font-size: 26px;
+  margin: 4px 0 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 2px solid var(--gold);
+  padding-bottom: 10px;
+}
+h1 .pin {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+}
+h2 {
+  font-size: 18px;
+  margin: 18px 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+h2::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 18px;
+  background: var(--gold);
+  border-radius: 2px;
+}
+
+/* === Cards === */
+
+.card {
+  background: var(--paper);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 14px;
+  box-shadow: var(--shadow);
+  border-left: 4px solid var(--green-fairway);
+  position: relative;
+  animation: card-fade-in 0.32s ease-out both;
+}
+.card.cream {
+  background: var(--cream);
+  border-left-color: var(--gold);
+}
+
+/* === Texte secondaire === */
+
+.muted { color: var(--text-muted); font-size: 14px; }
+.center { text-align: center; }
+
+/* === Form === */
+
+label {
+  display: block;
+  font-weight: 600;
+  margin: 12px 0 6px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--green-deep);
+}
+
+input, select, button, textarea {
+  font-size: 16px;
+  font-family: inherit;
+}
+
+input[type="text"], input[type="number"], select {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1.5px solid var(--sand);
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--text-dark);
+  transition: border-color 0.15s;
+}
+input:focus, select:focus {
+  outline: none;
+  border-color: var(--green-fairway);
+  box-shadow: 0 0 0 3px rgba(45, 106, 62, 0.15);
+}
+
+/* === Buttons === */
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 10px;
+  padding: 13px 16px;
+  background: var(--green-deep);
+  color: var(--cream);
+  font-weight: 600;
+  width: 100%;
+  letter-spacing: 0.3px;
+  transition: background 0.15s, transform 0.05s;
+  box-shadow: 0 2px 0 var(--green-fairway);
+}
+button:hover { background: var(--green-fairway); }
+button:active { transform: translateY(1px); box-shadow: 0 1px 0 var(--green-fairway); }
+button.secondary {
+  background: var(--cream);
+  color: var(--green-deep);
+  border: 1.5px solid var(--sand);
+  box-shadow: none;
+}
+button.secondary:hover { background: var(--gold-soft); }
+button.gold {
+  background: var(--gold);
+  color: var(--green-deep);
+  box-shadow: 0 2px 0 #a8884a;
+}
+button.gold:hover { background: #d4b87a; }
+button.danger { background: #8b3a3a; box-shadow: 0 2px 0 #6b2a2a; }
+button.danger:hover { background: #a04545; }
+button.small { padding: 8px 12px; font-size: 14px; width: auto; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* === Layout helpers === */
+
+.row { display: flex; gap: 8px; align-items: center; }
+.row > * { flex: 1; }
+.row > .narrow { flex: 0 0 auto; }
+
+/* === Tables === */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+}
+th, td {
+  padding: 10px 6px;
+  text-align: left;
+  border-bottom: 1px solid var(--green-light);
+}
+th {
+  font-weight: 600;
+  color: var(--green-deep);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: linear-gradient(180deg, var(--cream) 0%, transparent 100%);
+}
+tr.me { background: rgba(201, 169, 97, 0.15); }
+tr.rank-1 td { font-weight: 700; }
+tr.rank-1 .lb-rank { color: var(--gold); }
+tr.rank-1 td:first-child + td {
+  background-image: linear-gradient(90deg, transparent 0%, rgba(201, 169, 97, 0.18) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: shimmer 4s ease-in-out infinite;
+}
+
+.lb-rank { width: 36px; text-align: center; font-weight: 700; font-size: 16px; }
+.lb-score { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.lb-vp.under { color: #2d6a3e; font-weight: 700; }
+.lb-vp.over  { color: #8b3a3a; font-weight: 700; }
+.lb-vp.even  { color: var(--text-muted); }
+
+.trophy {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  vertical-align: -2px;
+  color: var(--gold);
+}
+
+/* === Scorecard === */
+
+.scorecard-grid {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  gap: 4px;
+  margin-top: 6px;
+}
+.scorecard-grid .h {
+  background: var(--green-deep);
+  color: var(--cream);
+  border-radius: 6px 6px 0 0;
+  padding: 4px 0;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.2;
+}
+.scorecard-grid .h .par {
+  display: block;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--gold);
+}
+.scorecard-grid .s {
+  border: 1.5px solid var(--sand);
+  border-radius: 0 0 8px 8px;
+  border-top: none;
+  padding: 8px 0 6px;
+  text-align: center;
+  font-size: 17px;
+  font-weight: 700;
+  background: var(--paper);
+  cursor: pointer;
+  min-height: 42px;
+  transition: transform 0.05s, box-shadow 0.1s;
+  font-variant-numeric: tabular-nums;
+}
+.scorecard-grid .s:hover { box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+.scorecard-grid .s.empty { color: var(--sand); font-weight: 400; }
+.scorecard-grid .s.eagle  { background: #fef3a3; color: #7a5c00; }
+.scorecard-grid .s.birdie { background: #b8dab0; color: var(--green-deep); }
+.scorecard-grid .s.par    { background: var(--paper); color: var(--text-dark); }
+.scorecard-grid .s.bogey  { background: #f0d9b5; color: #6b4a1a; }
+.scorecard-grid .s.dbogey { background: #e8b6b6; color: #6b2a2a; }
+.scorecard-grid .s.active {
+  outline: 3px solid var(--gold);
+  outline-offset: -1px;
+  z-index: 1;
+}
+
+.scorecard-totals {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--cream);
+  border-radius: 10px;
+  text-align: center;
+}
+.scorecard-totals .t-item .label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+.scorecard-totals .t-item .val {
+  font-family: Georgia, serif;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--green-deep);
+}
+
+/* === Numpad (sticky bottom sur mobile) === */
+
+.numpad-wrap {
+  position: sticky;
+  bottom: 0;
+  margin: 12px -16px -16px;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(180deg, transparent 0%, var(--cream) 30%, var(--cream) 100%);
+  z-index: 10;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.numpad {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+.numpad button {
+  background: var(--paper);
+  color: var(--text-dark);
+  border: 1.5px solid var(--sand);
+  font-size: 22px;
+  font-weight: 700;
+  padding: 16px 0;
+  width: 100%;
+  font-family: Georgia, serif;
+  box-shadow: 0 2px 0 rgba(212, 199, 154, 0.5);
+}
+.numpad button:hover { background: var(--green-light); border-color: var(--green-fairway); }
+.numpad button.active {
+  background: var(--green-deep);
+  color: var(--cream);
+  border-color: var(--green-deep);
+  box-shadow: 0 2px 0 var(--green-fairway);
+}
+.numpad button.clear {
+  background: var(--cream);
+  color: #8b3a3a;
+  font-size: 14px;
+  font-family: inherit;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+/* === Tags / chips === */
+
+.tag {
+  display: inline-block;
+  background: var(--cream);
+  border: 1px solid var(--sand);
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  margin-right: 4px;
+  margin-bottom: 4px;
+  color: var(--green-deep);
+  font-weight: 500;
+}
+.tag.primary {
+  background: var(--green-deep);
+  color: var(--cream);
+  border-color: var(--green-deep);
+}
+.tag.gold {
+  background: var(--gold);
+  color: var(--green-deep);
+  border-color: var(--gold);
+  font-weight: 600;
+}
+
+/* === Hole info bar === */
+
+.hole-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 12px 0;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, var(--green-deep) 0%, var(--green-fairway) 100%);
+  border-radius: 10px;
+  color: var(--cream);
+}
+.hole-info .h-num {
+  font-family: Georgia, serif;
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--gold);
+  line-height: 1;
+}
+.hole-info .h-meta { font-size: 13px; opacity: 0.9; }
+.hole-info .h-meta strong { color: var(--gold); font-weight: 700; }
+
+.hole-nav { display: flex; gap: 8px; align-items: center; }
+.hole-nav button { width: 48px; padding: 10px 0; font-size: 18px; font-family: Georgia, serif; }
+.hole-nav select { flex: 1; }
+
+/* === Links button === */
+
+a.button-link {
+  display: block;
+  text-align: center;
+  background: var(--green-deep);
+  color: var(--cream);
+  text-decoration: none;
+  padding: 14px;
+  border-radius: 10px;
+  font-weight: 600;
+  margin-top: 8px;
+  box-shadow: 0 2px 0 var(--green-fairway);
+}
+a.button-link:hover { background: var(--green-fairway); }
+a.button-link.secondary {
+  background: var(--cream);
+  color: var(--green-deep);
+  border: 1.5px solid var(--sand);
+  box-shadow: none;
+}
+a.button-link.gold {
+  background: var(--gold);
+  color: var(--green-deep);
+  box-shadow: 0 2px 0 #a8884a;
+}
+
+/* === Errors === */
+
+.error {
+  color: #8b3a3a;
+  font-size: 14px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: rgba(139, 58, 58, 0.08);
+  border-radius: 6px;
+  display: none;
+}
+.error.show { display: block; }
+
+/* === Course selector cards (setup) === */
+
+.course-card {
+  background: var(--paper);
+  border: 1.5px solid var(--sand);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.05s;
+}
+.course-card:hover { border-color: var(--green-fairway); }
+.course-card.selected {
+  border-color: var(--green-deep);
+  border-width: 2px;
+  background: linear-gradient(135deg, var(--cream) 0%, var(--paper) 100%);
+}
+.course-card .c-name {
+  font-family: Georgia, serif;
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--green-deep);
+}
+.course-card .c-meta { margin-top: 4px; }
+
+/* === Modal (identity picker) === */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(26, 36, 25, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+  backdrop-filter: blur(4px);
+}
+.modal-box {
+  background: var(--cream);
+  border-radius: 14px;
+  max-width: 420px;
+  width: 100%;
+  padding: 20px;
+  box-shadow: var(--shadow-deep);
+  border-top: 4px solid var(--gold);
+}
+.modal-box h2 { margin-top: 0; }
+.modal-box .player-pick {
+  display: block;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 14px;
+  text-align: left;
+  background: var(--paper);
+  color: var(--text-dark);
+  border: 1.5px solid var(--sand);
+  font-weight: 500;
+  box-shadow: none;
+}
+.modal-box .player-pick:hover {
+  background: var(--green-light);
+  border-color: var(--green-fairway);
+}
+.modal-box .player-pick .name { font-weight: 700; color: var(--green-deep); }
+
+/* === Empty state === */
+
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+}
+.empty-state .icon {
+  width: 60px;
+  height: 60px;
+  margin: 0 auto 14px;
+  color: var(--sand);
+}
+
+/* === Code display (setup) === */
+
+.code-box {
+  background: linear-gradient(135deg, var(--cream) 0%, #fff 100%);
+  border: 2px dashed var(--gold);
+  border-radius: 14px;
+  padding: 18px;
+  text-align: center;
+  margin: 14px 0;
+}
+.code-box .label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.code-box .code {
+  font-family: Georgia, serif;
+  font-size: 48px;
+  font-weight: 700;
+  color: var(--green-deep);
+  letter-spacing: 8px;
+  margin: 6px 0;
+  text-shadow: 1px 1px 0 var(--gold-soft);
+}
+.code-box .hint { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+.code-box button { margin-top: 10px; max-width: 200px; margin-left: auto; margin-right: auto; }
+
+/* === Final ranking modal === */
+
+.final-modal h2 {
+  text-align: center;
+  font-size: 22px;
+  margin: 0 0 8px;
+}
+.final-modal h2::before { display: none; }
+.final-modal .subtitle {
+  text-align: center;
+  color: var(--text-muted);
+  margin-bottom: 14px;
+}
+.final-modal .actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 14px;
+}
+.final-modal .actions .full { grid-column: 1 / -1; }
+
+/* === History === */
+
+.history-item {
+  background: var(--paper);
+  border-left: 4px solid var(--green-fairway);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  box-shadow: var(--shadow);
+}
+.history-item .h-title {
+  font-family: Georgia, serif;
+  font-weight: 700;
+  color: var(--green-deep);
+  font-size: 16px;
+}
+.history-item .h-meta { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.history-item .h-actions { display: flex; gap: 8px; margin-top: 10px; }
+.history-item .h-actions a { flex: 1; }
+
+/* === Header strip (game.html) === */
+
+.game-header {
+  background: linear-gradient(135deg, var(--green-deep) 0%, var(--green-fairway) 100%);
+  color: var(--cream);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: var(--shadow);
+  border-left: none;
+}
+.game-header .pin-bg {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  color: var(--gold);
+}
+.game-header .gh-title {
+  font-family: Georgia, serif;
+  font-size: 18px;
+  font-weight: 700;
+  flex: 1;
+  line-height: 1.2;
+}
+.game-header .gh-sub {
+  font-size: 12px;
+  opacity: 0.85;
+  margin-top: 2px;
+}
+.game-header button { width: auto; flex: 0 0 auto; }
+
+/* === Print (scorecard) === */
+
+@media print {
+  body { background: white !important; padding: 0; max-width: none; }
+  .no-print { display: none !important; }
+  .card { box-shadow: none; border: 1px solid #ccc; page-break-inside: avoid; }
+  .game-header { background: var(--green-deep) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .scorecard-grid .h, .scorecard-grid .s.eagle, .scorecard-grid .s.birdie,
+  .scorecard-grid .s.bogey, .scorecard-grid .s.dbogey {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

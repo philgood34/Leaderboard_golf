@@ -1,0 +1,206 @@
+// Moteur de scoring : handicap de jeu, repartition des coups rendus,
+// et calcul du classement pour chaque formule.
+
+const FORMULAS = {
+  STROKE_BRUT: 'stroke_brut',
+  STROKE_NET:  'stroke_net',
+  MATCH_BRUT:  'match_brut',
+  MATCH_NET:   'match_net',
+  CHICAGO:     'chicago'
+};
+
+const FORMULA_LABELS = {
+  stroke_brut: 'Stroke Play Brut',
+  stroke_net:  'Stroke Play Net',
+  match_brut:  'Matchplay Brut (skins)',
+  match_net:   'Matchplay Net (skins)',
+  chicago:     'Chicago'
+};
+
+// HCP de jeu (course handicap) = round(index * slope/113 + (SSS - par))
+function playingHandicap(hcpIndex, slope, sss, parTotal) {
+  return Math.round(hcpIndex * (slope / 113) + (sss - parTotal));
+}
+
+// Coups rendus sur un trou donne en fonction du HCP de jeu et du Stroke Index.
+// HCP positif : le joueur RECOIT des coups (valeur >= 0).
+// HCP negatif : le joueur DONNE des coups (valeur <= 0).
+function strokesOnHole(playingHcp, si) {
+  if (playingHcp >= 0) {
+    const base = Math.floor(playingHcp / 18);
+    const extras = playingHcp % 18;
+    return base + (si <= extras ? 1 : 0);
+  } else {
+    const n = -playingHcp;
+    const base = Math.floor(n / 18);
+    const extras = n % 18;
+    return -(base + (si > 18 - extras ? 1 : 0));
+  }
+}
+
+// Points Chicago (gross vs par) : bogey+ = 1, par = 2, birdie = 4, eagle+ = 8.
+function chicagoPoints(grossStrokes, par) {
+  const diff = grossStrokes - par;
+  if (diff <= -2) return 8;
+  if (diff === -1) return 4;
+  if (diff === 0)  return 2;
+  return 1; // bogey ou pire
+}
+
+// Construit le classement.
+// course = { par_total, slope, sss, holes: [{num, par, si}] }
+// players = [{ id, name, sex, handicap }]
+// scoresByPlayer = { [playerId]: { [holeNum]: strokes } }
+function computeLeaderboard(course, formula, players, scoresByPlayer) {
+  const holes = course.holes;
+  const enriched = players.map(p => {
+    const playingHcp = playingHandicap(p.handicap, course.slope, course.sss, course.par_total);
+    const playerScores = scoresByPlayer[p.id] || {};
+    const perHole = holes.map(h => {
+      const strokes = playerScores[h.num];
+      const recv = strokesOnHole(playingHcp, h.si);
+      const net = (strokes != null) ? (strokes - recv) : null;
+      return {
+        num: h.num,
+        par: h.par,
+        si: h.si,
+        strokes,
+        strokesReceived: recv,
+        net
+      };
+    });
+    const holesPlayed = perHole.filter(h => h.strokes != null).length;
+    const grossTotal = perHole.reduce((s, h) => s + (h.strokes ?? 0), 0);
+    const netTotal = perHole.reduce((s, h) => s + (h.net ?? 0), 0);
+    return {
+      id: p.id,
+      name: p.name,
+      sex: p.sex,
+      handicap: p.handicap,
+      playingHcp,
+      perHole,
+      holesPlayed,
+      grossTotal,
+      netTotal
+    };
+  });
+
+  switch (formula) {
+    case FORMULAS.STROKE_BRUT:
+      return rankStroke(enriched, 'gross', course.par_total);
+    case FORMULAS.STROKE_NET:
+      return rankStroke(enriched, 'net', course.par_total);
+    case FORMULAS.MATCH_BRUT:
+      return rankMatchplay(enriched, course.holes, false);
+    case FORMULAS.MATCH_NET:
+      return rankMatchplay(enriched, course.holes, true);
+    case FORMULAS.CHICAGO:
+      return rankChicago(enriched, course.holes);
+    default:
+      throw new Error(`Formule inconnue : ${formula}`);
+  }
+}
+
+function rankStroke(enriched, mode, parTotal) {
+  const rows = enriched.map(p => {
+    const total = mode === 'gross' ? p.grossTotal : p.netTotal;
+    // par "joue" : somme des pars des trous joues
+    const parPlayed = p.perHole
+      .filter(h => h.strokes != null)
+      .reduce((s, h) => s + h.par, 0);
+    const vsPar = total - parPlayed;
+    return {
+      playerId: p.id,
+      name: p.name,
+      handicap: p.handicap,
+      playingHcp: p.playingHcp,
+      holesPlayed: p.holesPlayed,
+      score: total,
+      scoreLabel: total === 0 && p.holesPlayed === 0 ? '-' : String(total),
+      vsPar,
+      vsParLabel: p.holesPlayed === 0 ? '-' : (vsPar === 0 ? 'E' : (vsPar > 0 ? `+${vsPar}` : `${vsPar}`)),
+      sortKey: p.holesPlayed === 0 ? Infinity : total
+    };
+  });
+  rows.sort((a, b) => a.sortKey - b.sortKey);
+  return assignRanks(rows);
+}
+
+function rankMatchplay(enriched, holes, useNet) {
+  // Skins : meilleur score (strict) sur le trou = 1 trou gagne.
+  const wins = Object.fromEntries(enriched.map(p => [p.id, 0]));
+  for (const h of holes) {
+    const entries = enriched
+      .map(p => {
+        const ph = p.perHole.find(x => x.num === h.num);
+        if (!ph || ph.strokes == null) return null;
+        return { id: p.id, score: useNet ? ph.net : ph.strokes };
+      })
+      .filter(Boolean);
+    if (entries.length < 2) continue;
+    const min = Math.min(...entries.map(e => e.score));
+    const winners = entries.filter(e => e.score === min);
+    if (winners.length === 1) wins[winners[0].id] += 1;
+  }
+  const rows = enriched.map(p => ({
+    playerId: p.id,
+    name: p.name,
+    handicap: p.handicap,
+    playingHcp: p.playingHcp,
+    holesPlayed: p.holesPlayed,
+    score: wins[p.id],
+    scoreLabel: `${wins[p.id]} trou${wins[p.id] > 1 ? 's' : ''}`,
+    vsPar: null,
+    vsParLabel: '',
+    sortKey: -wins[p.id]
+  }));
+  rows.sort((a, b) => a.sortKey - b.sortKey);
+  return assignRanks(rows);
+}
+
+function rankChicago(enriched, holes) {
+  const rows = enriched.map(p => {
+    const quota = 39 - p.playingHcp;
+    let pts = 0;
+    for (const ph of p.perHole) {
+      if (ph.strokes == null) continue;
+      pts += chicagoPoints(ph.strokes, ph.par);
+    }
+    const final = pts - quota;
+    return {
+      playerId: p.id,
+      name: p.name,
+      handicap: p.handicap,
+      playingHcp: p.playingHcp,
+      holesPlayed: p.holesPlayed,
+      score: final,
+      scoreLabel: `${final >= 0 ? '+' : ''}${final} (${pts}/${quota})`,
+      vsPar: null,
+      vsParLabel: '',
+      sortKey: -final
+    };
+  });
+  rows.sort((a, b) => a.sortKey - b.sortKey);
+  return assignRanks(rows);
+}
+
+function assignRanks(rows) {
+  let lastKey = null;
+  let lastRank = 0;
+  rows.forEach((r, i) => {
+    if (r.sortKey !== lastKey) {
+      lastRank = i + 1;
+      lastKey = r.sortKey;
+    }
+    r.rank = lastRank;
+  });
+  return rows;
+}
+
+module.exports = {
+  FORMULAS,
+  FORMULA_LABELS,
+  playingHandicap,
+  strokesOnHole,
+  computeLeaderboard
+};

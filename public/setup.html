@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#1a4d2e">
+  <title>Configurer la partie - Leaderboard Golf</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <h1>
+    <svg class="pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path class="flag-anim" d="M5 21V4l11 4-11 4" fill="#c9a961" stroke="#1a4d2e"/>
+      <line x1="5" y1="4" x2="5" y2="22" stroke="#1a4d2e" stroke-linecap="round"/>
+      <circle cx="5" cy="22" r="1.5" fill="#1a4d2e"/>
+    </svg>
+    Departs
+  </h1>
+
+  <div id="step-create" class="card">
+    <h2>1. Choix du parcours</h2>
+    <div id="course-list"></div>
+
+    <div id="loop-twice-row" style="display:none; margin-top:12px">
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;text-transform:none;letter-spacing:0">
+        <input type="checkbox" id="loop-twice" style="width:auto;flex:0;transform:scale(1.4)">
+        <span>Jouer en 18 trous (deux tours du parcours)</span>
+      </label>
+    </div>
+
+    <h2 style="margin-top:20px">2. Formule de jeu</h2>
+    <select id="formula-select">
+      <option value="stroke_brut">Stroke Play Brut</option>
+      <option value="stroke_net" selected>Stroke Play Net</option>
+      <option value="match_brut">Matchplay Brut (skins)</option>
+      <option value="match_net">Matchplay Net (skins)</option>
+      <option value="chicago">Chicago</option>
+    </select>
+
+    <button id="create-btn" class="gold" style="margin-top:18px">Creer la partie</button>
+  </div>
+
+  <div id="step-code" class="card cream" style="display:none">
+    <h2 style="margin-top:0">Code d'acces</h2>
+    <div class="code-box">
+      <div class="label">Code de la partie</div>
+      <div class="code" id="code-display">----</div>
+      <div class="hint">Partage ce code aux joueurs. Sans lui, impossible de rejoindre.</div>
+      <button id="copy-code" class="secondary">Copier le code</button>
+    </div>
+  </div>
+
+  <div id="step-players" class="card" style="display:none">
+    <h2>Le flight</h2>
+    <div id="players-list" style="margin-bottom:14px"></div>
+
+    <div class="card cream" style="margin:0; padding: 14px; border-left: none; box-shadow: none">
+      <h2 style="margin-top:0">Ajouter un joueur</h2>
+      <label>Nom</label>
+      <input type="text" id="p-name" placeholder="Prenom" autocomplete="off">
+
+      <label>Sexe</label>
+      <select id="p-sex">
+        <option value="M">Homme</option>
+        <option value="F">Femme</option>
+      </select>
+
+      <label>Index (HCP)</label>
+      <input type="number" id="p-hcp" step="0.1" placeholder="Ex: 18.4" inputmode="decimal">
+
+      <button id="add-btn" style="margin-top:14px">Ajouter au flight</button>
+      <div id="add-error" class="error"></div>
+    </div>
+
+    <button id="start-btn" class="gold" style="margin-top:18px">Au depart !</button>
+  </div>
+
+  <a href="/" class="button-link secondary" style="margin-top:14px">Retour au club-house</a>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    let gameId = null;
+    let gameCode = null;
+    let courses = [];
+    let selectedCourseId = null;
+
+    function authHeaders() { return gameCode ? { 'X-Game-Code': gameCode } : {}; }
+
+    async function loadCourses() {
+      courses = await fetch('/api/courses').then(r => r.json());
+      courses.sort((a, b) => {
+        if (a.holes_count !== b.holes_count) return b.holes_count - a.holes_count;
+        return a.name.localeCompare(b.name);
+      });
+      renderCourseList();
+    }
+
+    function renderCourseList() {
+      const div = document.getElementById('course-list');
+      div.innerHTML = courses.map(c => {
+        const sel = c.id === selectedCourseId ? ' selected' : '';
+        return `<div class="course-card${sel}" data-id="${c.id}" data-holes="${c.holes_count}">
+          <div class="c-name">${escapeHtml(c.name)}</div>
+          <div class="c-meta">
+            <span class="tag">${escapeHtml(c.city || '')}</span>
+            <span class="tag primary">${c.holes_count} trous</span>
+            <span class="tag">Par ${c.par_total}</span>
+            <span class="tag">SSS ${c.sss}</span>
+            <span class="tag">Slope ${c.slope}</span>
+          </div>
+        </div>`;
+      }).join('');
+      div.querySelectorAll('.course-card').forEach(el => {
+        el.addEventListener('click', () => {
+          selectedCourseId = Number(el.dataset.id);
+          renderCourseList();
+          updateLoopTwiceVisibility();
+        });
+      });
+      if (!selectedCourseId && courses[0]) {
+        selectedCourseId = courses[0].id;
+        renderCourseList();
+        updateLoopTwiceVisibility();
+      }
+    }
+
+    function updateLoopTwiceVisibility() {
+      const c = courses.find(c => c.id === selectedCourseId);
+      const row = document.getElementById('loop-twice-row');
+      row.style.display = c && c.holes_count === 9 ? 'block' : 'none';
+      if (c && c.holes_count !== 9) document.getElementById('loop-twice').checked = false;
+    }
+
+    async function checkExisting() {
+      const url = new URL(location.href);
+      const reset = url.searchParams.get('reset') === '1';
+      if (reset) return;
+      const meta = await fetch('/api/games/active/exists').then(r => r.json());
+      if (meta.exists && meta.status === 'setup') {
+        const code = localStorage.getItem('game_code_' + meta.id);
+        if (!code) return;
+        const r = await fetch('/api/games/' + meta.id, { headers: { 'X-Game-Code': code } });
+        if (r.ok) {
+          const data = await r.json();
+          gameId = data.game.id;
+          gameCode = code;
+          showCodeStep();
+          showPlayersStep(data);
+        }
+      }
+    }
+
+    document.getElementById('create-btn').addEventListener('click', async () => {
+      if (!selectedCourseId) { alert('Choisis un parcours'); return; }
+      const formula = document.getElementById('formula-select').value;
+      const loop_twice = document.getElementById('loop-twice').checked ? 1 : 0;
+      const res = await fetch('/api/games', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ course_id: selectedCourseId, formula, loop_twice })
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || 'Erreur'); return; }
+      gameId = data.game.id;
+      gameCode = data.code;
+      localStorage.setItem('game_code_' + gameId, gameCode);
+      showCodeStep();
+      showPlayersStep(data);
+    });
+
+    function showCodeStep() {
+      document.getElementById('step-create').style.display = 'none';
+      document.getElementById('step-code').style.display = 'block';
+      document.getElementById('code-display').textContent = gameCode;
+    }
+
+    document.getElementById('copy-code').addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(gameCode);
+        document.getElementById('copy-code').textContent = 'Copie !';
+        setTimeout(() => document.getElementById('copy-code').textContent = 'Copier le code', 1500);
+      } catch (e) { alert('Code : ' + gameCode); }
+    });
+
+    function showPlayersStep(data) {
+      document.getElementById('step-players').style.display = 'block';
+      renderPlayers(data.players || []);
+      const sock = io();
+      sock.emit('join', { gameId, code: gameCode });
+      sock.on('game:update', d => renderPlayers(d.players));
+    }
+
+    function renderPlayers(players) {
+      const div = document.getElementById('players-list');
+      if (!players.length) {
+        div.innerHTML = '<p class="muted" style="text-align:center;padding:14px 0">Aucun joueur dans le flight.</p>';
+        return;
+      }
+      div.innerHTML = `<table>
+        <thead><tr><th>Joueur</th><th>Sexe</th><th class="lb-score">Index</th><th class="lb-score">Jeu</th><th></th></tr></thead>
+        <tbody>${players.map(p => `
+          <tr>
+            <td><strong>${escapeHtml(p.name)}</strong></td>
+            <td>${p.sex}</td>
+            <td class="lb-score">${p.handicap}</td>
+            <td class="lb-score"><strong>${p.playingHcp}</strong></td>
+            <td><button class="small danger" data-del="${p.id}">Retirer</button></td>
+          </tr>
+        `).join('')}</tbody></table>`;
+      div.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
+        await fetch(`/api/games/${gameId}/players/${b.dataset.del}`, { method: 'DELETE', headers: authHeaders() });
+      }));
+    }
+
+    document.getElementById('add-btn').addEventListener('click', async () => {
+      const name = document.getElementById('p-name').value.trim();
+      const sex = document.getElementById('p-sex').value;
+      const handicap = document.getElementById('p-hcp').value;
+      const err = document.getElementById('add-error');
+      err.classList.remove('show'); err.textContent = '';
+      if (!name) { showError(err, 'Nom requis'); return; }
+      if (handicap === '') { showError(err, 'Index requis'); return; }
+      const res = await fetch(`/api/games/${gameId}/players`, {
+        method: 'POST', headers: {'Content-Type': 'application/json', ...authHeaders()},
+        body: JSON.stringify({ name, sex, handicap: Number(handicap) })
+      });
+      if (!res.ok) { showError(err, (await res.json()).error || 'Erreur'); return; }
+      document.getElementById('p-name').value = '';
+      document.getElementById('p-hcp').value = '';
+      document.getElementById('p-name').focus();
+    });
+
+    function showError(el, msg) { el.textContent = msg; el.classList.add('show'); }
+
+    document.getElementById('start-btn').addEventListener('click', async () => {
+      const res = await fetch(`/api/games/${gameId}/start`, { method: 'POST', headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || 'Erreur'); return; }
+      location.href = '/game.html';
+    });
+
+    function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);}
+
+    loadCourses().then(checkExisting);
+  </script>
+</body>
+</html>

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1a4d2e">
+  <title>Historique - Leaderboard Golf</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <h1>
+    <svg class="pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path class="flag-anim" d="M5 21V4l11 4-11 4" fill="#c9a961" stroke="#1a4d2e"/>
+      <line x1="5" y1="4" x2="5" y2="22" stroke="#1a4d2e" stroke-linecap="round"/>
+      <circle cx="5" cy="22" r="1.5" fill="#1a4d2e"/>
+    </svg>
+    Historique
+  </h1>
+
+  <div id="loading" class="card cream center muted">Chargement...</div>
+  <div id="empty" class="card cream center muted" style="display:none">
+    <p>Aucune partie terminee pour l'instant.</p>
+  </div>
+  <div id="list"></div>
+
+  <a href="/" class="button-link secondary" style="margin-top:14px">Retour au club-house</a>
+
+  <script>
+    function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);}
+    function formatDate(s) {
+      if (!s) return '-';
+      const d = new Date(s.replace(' ', 'T') + 'Z');
+      if (isNaN(d.getTime())) return s;
+      return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) +
+             ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    async function init() {
+      const list = await fetch('/api/games/history').then(r => r.json());
+      document.getElementById('loading').style.display = 'none';
+      if (!list.length) { document.getElementById('empty').style.display = 'block'; return; }
+      const div = document.getElementById('list');
+      div.innerHTML = list.map(g => {
+        const csv = `/api/games/${g.id}/scorecard.csv`;
+        const print = `/scorecard.html?game=${g.id}`;
+        return `<div class="history-item">
+          <div class="h-title">${escapeHtml(g.course_name)}</div>
+          <div class="h-meta">
+            <span class="tag primary">${escapeHtml(g.formula_label)}</span>
+            ${g.loop_twice ? '<span class="tag">2 tours</span>' : ''}
+            <span class="tag">${g.player_count} joueur${g.player_count > 1 ? 's' : ''}</span>
+            ${g.winner ? `<span class="tag gold">Vainqueur : ${escapeHtml(g.winner)}</span>` : ''}
+          </div>
+          <div class="h-meta">${formatDate(g.closed_at)}</div>
+          <div class="h-actions">
+            <button class="secondary small" data-id="${g.id}" data-action="csv">CSV</button>
+            <button class="secondary small" data-id="${g.id}" data-action="print">Carte imprimable</button>
+          </div>
+        </div>`;
+      }).join('');
+
+      div.querySelectorAll('[data-action]').forEach(b => {
+        b.addEventListener('click', () => {
+          const id = b.dataset.id;
+          const action = b.dataset.action;
+          let code = localStorage.getItem('game_code_' + id);
+          if (!code) {
+            code = prompt('Code 4 chiffres de cette partie ?');
+            if (!code) return;
+            localStorage.setItem('game_code_' + id, code);
+          }
+          if (action === 'csv') {
+            window.location.href = `/api/games/${id}/scorecard.csv?code=${encodeURIComponent(code)}`;
+          } else {
+            window.open(`/scorecard.html?game=${id}&code=${encodeURIComponent(code)}`, '_blank');
+          }
+        });
+      });
+    }
+    init();
+  </script>
+</body>
+</html>

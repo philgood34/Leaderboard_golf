@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1a4d2e">
+  <title>Carte de score - Leaderboard Golf</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .sc-hole-row { display: grid; grid-template-columns: 60px repeat(9, 1fr) 60px; gap: 2px; font-size: 12px; }
+    .sc-hole-row > div { padding: 6px 4px; text-align: center; border: 1px solid #d4c79a; }
+    .sc-hole-row .lbl { font-weight: 600; background: #1a4d2e; color: #faf6e9; }
+    .sc-hole-row .par-row { background: #c9a961; color: #1a2419; font-weight: 700; }
+    .sc-hole-row .si-row  { background: #faf6e9; color: #6b7768; font-size: 11px; }
+    .sc-hole-row .total   { background: #1a4d2e; color: #faf6e9; font-weight: 700; }
+    .sc-block { margin-bottom: 14px; }
+    .sc-block-title { font-family: Georgia, serif; font-weight: 700; color: #1a4d2e; margin: 8px 0 4px; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div id="loading" class="card cream center muted">Chargement de la carte...</div>
+  <div id="error" class="card center" style="display:none;color:#8b3a3a"></div>
+  <div id="content" style="display:none">
+    <div class="game-header" style="margin-bottom:10px">
+      <svg class="pin-bg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path class="flag-anim" d="M5 21V4l11 4-11 4" fill="#c9a961"/>
+        <line x1="5" y1="4" x2="5" y2="22" stroke="#faf6e9" stroke-linecap="round"/>
+        <circle cx="5" cy="22" r="1.5" fill="#faf6e9"/>
+      </svg>
+      <div style="flex:1">
+        <div class="gh-title" id="title">-</div>
+        <div class="gh-sub" id="subtitle">-</div>
+      </div>
+      <button class="gold small no-print" onclick="window.print()">Imprimer / PDF</button>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">Classement final</h2>
+      <div id="ranking"></div>
+    </div>
+
+    <div id="cards"></div>
+
+    <a href="/" class="button-link secondary no-print" style="margin-top:14px">Retour au club-house</a>
+  </div>
+
+  <script>
+    function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);}
+
+    async function init() {
+      const params = new URLSearchParams(location.search);
+      const id = params.get('game');
+      let code = params.get('code') || localStorage.getItem('game_code_' + id);
+      if (!id) { showError('Parametre game manquant'); return; }
+      if (!code) { code = prompt('Code 4 chiffres ?'); if (!code) return; localStorage.setItem('game_code_' + id, code); }
+
+      const res = await fetch('/api/games/' + id, { headers: { 'X-Game-Code': code } });
+      if (!res.ok) { showError('Code invalide ou partie introuvable'); return; }
+      const data = await res.json();
+      render(data);
+    }
+
+    function showError(msg) {
+      document.getElementById('loading').style.display = 'none';
+      const e = document.getElementById('error');
+      e.style.display = 'block'; e.textContent = msg;
+    }
+
+    function render(d) {
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('content').style.display = 'block';
+      document.getElementById('title').textContent = d.course.name;
+      const date = d.game.closed_at || d.game.created_at;
+      document.getElementById('subtitle').textContent =
+        `${d.formulaLabel} - ${d.course.holes.length} trous - ${date}`;
+
+      const showVsPar = d.game.formula.startsWith('stroke');
+      document.getElementById('ranking').innerHTML = `<table><thead><tr>
+        <th class="lb-rank">#</th><th>Joueur</th><th class="lb-score">Index</th><th class="lb-score">Jeu</th>
+        <th class="lb-score">Score</th>${showVsPar ? '<th class="lb-score">Vs Par</th>' : ''}
+      </tr></thead><tbody>${d.leaderboard.map(r => `
+        <tr class="${r.rank === 1 ? 'rank-1' : ''}">
+          <td class="lb-rank">${r.rank}</td>
+          <td>${escapeHtml(r.name)}</td>
+          <td class="lb-score">${r.handicap}</td>
+          <td class="lb-score">${r.playingHcp}</td>
+          <td class="lb-score">${escapeHtml(r.scoreLabel)}</td>
+          ${showVsPar ? `<td class="lb-score lb-vp ${r.vsPar < 0 ? 'under' : r.vsPar > 0 ? 'over' : 'even'}">${r.vsParLabel}</td>` : ''}
+        </tr>`).join('')}</tbody></table>`;
+
+      // Cartes detaillees par joueur
+      const cards = document.getElementById('cards');
+      cards.innerHTML = d.players.map(p => buildPlayerCard(p, d)).join('');
+    }
+
+    function buildPlayerCard(p, d) {
+      const ps = d.scores[p.id] || {};
+      const holes = d.course.holes;
+      const hcount = holes.length;
+      const total = Object.values(ps).reduce((s, v) => s + v, 0);
+      const lb = d.leaderboard.find(r => r.playerId === p.id);
+
+      function rowsForRange(from, to) {
+        const slice = holes.filter(h => h.num >= from && h.num <= to);
+        const labels = ['Trou', ...slice.map(h => h.num), 'Total'];
+        const pars   = ['Par',  ...slice.map(h => h.par), slice.reduce((s, h) => s + h.par, 0)];
+        const sis    = ['SI',   ...slice.map(h => h.si),  ''];
+        const scores = ['Score', ...slice.map(h => ps[h.num] != null ? ps[h.num] : '-'), slice.reduce((s, h) => s + (ps[h.num] || 0), 0) || '-'];
+        const cell = (v, cls) => `<div class="${cls || ''}">${v}</div>`;
+        return `
+          <div class="sc-hole-row">${labels.map((v, i) => cell(v, i === 0 ? 'lbl' : i === labels.length - 1 ? 'total' : 'lbl')).join('')}</div>
+          <div class="sc-hole-row">${pars.map((v, i) => cell(v, i === 0 ? 'par-row' : i === pars.length - 1 ? 'par-row' : 'par-row')).join('')}</div>
+          <div class="sc-hole-row">${sis.map((v, i) => cell(v, 'si-row')).join('')}</div>
+          <div class="sc-hole-row">${scores.map((v, i) => cell(v, i === 0 ? 'lbl' : i === scores.length - 1 ? 'total' : '')).join('')}</div>
+        `;
+      }
+
+      let body = '';
+      if (hcount > 9) {
+        body = `<div class="sc-block"><div class="sc-block-title">Aller (1-9)</div>${rowsForRange(1, 9)}</div>
+                <div class="sc-block"><div class="sc-block-title">Retour (10-${hcount})</div>${rowsForRange(10, hcount)}</div>`;
+      } else {
+        body = `<div class="sc-block">${rowsForRange(1, hcount)}</div>`;
+      }
+
+      return `<div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
+          <div>
+            <div style="font-family:Georgia,serif;font-size:18px;font-weight:700;color:#1a4d2e">${escapeHtml(p.name)} <span class="muted" style="font-size:12px">(${p.sex})</span></div>
+            <div class="muted" style="font-size:13px">Index ${p.handicap} &middot; HCP de jeu ${p.playingHcp}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px">Score formule</div>
+            <div style="font-family:Georgia,serif;font-size:22px;font-weight:700;color:#1a4d2e">${lb ? escapeHtml(lb.scoreLabel) : '-'}</div>
+          </div>
+        </div>
+        <div style="margin-top:10px">${body}</div>
+        <div style="margin-top:8px;text-align:right;font-weight:600">Brut total : ${total || '-'}</div>
+      </div>`;
+    }
+
+    init();
+  </script>
+</body>
+</html>

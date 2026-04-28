@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#1a4d2e">
+  <title>Partie en cours - Leaderboard Golf</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="auth-block" class="card cream" style="display:none">
+    <h2 style="margin-top:0">Code requis</h2>
+    <p class="muted">Cette partie est protegee par un code 4 chiffres. Demande-le a l'organisateur.</p>
+    <label>Code</label>
+    <input type="text" id="auth-code" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" style="font-size:24px;text-align:center;letter-spacing:8px;font-family:Georgia,serif">
+    <button id="auth-submit" class="gold" style="margin-top:10px">Rejoindre</button>
+    <div id="auth-error" class="error"></div>
+  </div>
+
+  <div id="game-root" style="display:none">
+    <div class="game-header">
+      <svg class="pin-bg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path class="flag-anim" d="M5 21V4l11 4-11 4" fill="#c9a961"/>
+        <line x1="5" y1="4" x2="5" y2="22" stroke="#faf6e9" stroke-linecap="round"/>
+        <circle cx="5" cy="22" r="1.5" fill="#faf6e9"/>
+      </svg>
+      <div style="flex:1">
+        <div class="gh-title" id="course-name">-</div>
+        <div class="gh-sub" id="formula-name">-</div>
+      </div>
+      <button id="finish-btn" class="secondary small">Terminer</button>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">
+        <svg class="trophy" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M7 4v3a5 5 0 0010 0V4H7zm-3 1v2a3 3 0 003 3v-1a2 2 0 01-2-2V5H4zm14 0v2a2 2 0 01-2 2v1a3 3 0 003-3V5h-1zM10 14h4v2H10v-2zm-2 4h8v2H8v-2z"/>
+        </svg>
+        Leaderboard
+      </h2>
+      <div id="leaderboard"></div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">Saisir un score</h2>
+
+      <label>Joueur</label>
+      <select id="player-select"></select>
+
+      <div class="hole-info">
+        <div>
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.7">Trou</div>
+          <span class="h-num" id="hole-num">1</span>
+        </div>
+        <div class="h-meta" style="text-align:right">
+          Par <strong id="hole-par">-</strong> &middot; SI <strong id="hole-si">-</strong><br>
+          <span id="hole-strokes-info" style="font-size:12px"></span>
+        </div>
+      </div>
+
+      <div class="hole-nav">
+        <button class="secondary" id="prev-hole">&larr;</button>
+        <select id="hole-select"></select>
+        <button class="secondary" id="next-hole">&rarr;</button>
+      </div>
+
+      <div class="numpad-wrap">
+        <div class="numpad" id="numpad"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">Carte de score</h2>
+      <div id="scorecard-container"></div>
+
+      <div class="scorecard-totals" id="totals">
+        <div class="t-item"><span class="label">Brut</span><span class="val" id="t-gross">-</span></div>
+        <div class="t-item"><span class="label">Trous joues</span><span class="val" id="t-played">-</span></div>
+        <div class="t-item"><span class="label" id="t-formula-label">Score</span><span class="val" id="t-formula">-</span></div>
+      </div>
+    </div>
+
+    <a href="/" class="button-link secondary">Retour au club-house</a>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    let state = null;
+    let me = null;
+    let selectedPlayerId = null;
+    let selectedHole = 1;
+    let sock = null;
+    let gameId = null;
+    let gameCode = null;
+    let lastSetCell = null;
+    let endShown = false;
+
+    function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);}
+    function authHeaders() { return { 'X-Game-Code': gameCode }; }
+    function holesCount() { return state ? state.course.holes.length : 18; }
+
+    async function init() {
+      // 1. Recuperer la partie active (id) et savoir si code requis
+      const meta = await fetch('/api/games/active/exists').then(r => r.json());
+      if (!meta.exists) {
+        document.body.innerHTML = '<div class="card cream center"><p class="muted">Aucune partie active.</p><a class="button-link" href="/">Club-house</a></div>';
+        return;
+      }
+      gameId = meta.id;
+      if (meta.status === 'setup') { location.href = '/setup.html'; return; }
+
+      // 2. Code en localStorage ?
+      gameCode = localStorage.getItem('game_code_' + gameId);
+      if (!gameCode) { showAuthPrompt(); return; }
+      const ok = await tryLoad();
+      if (!ok) showAuthPrompt();
+    }
+
+    function showAuthPrompt() {
+      document.getElementById('auth-block').style.display = 'block';
+      document.getElementById('auth-code').focus();
+    }
+
+    document.getElementById('auth-submit').addEventListener('click', submitAuth);
+    document.getElementById('auth-code').addEventListener('keydown', e => { if (e.key === 'Enter') submitAuth(); });
+
+    async function submitAuth() {
+      const code = document.getElementById('auth-code').value.trim();
+      const err = document.getElementById('auth-error');
+      err.classList.remove('show'); err.textContent = '';
+      if (!/^\d{4}$/.test(code)) { err.classList.add('show'); err.textContent = 'Le code doit faire 4 chiffres.'; return; }
+      gameCode = code;
+      const ok = await tryLoad();
+      if (ok) {
+        localStorage.setItem('game_code_' + gameId, code);
+        document.getElementById('auth-block').style.display = 'none';
+      } else {
+        err.classList.add('show'); err.textContent = 'Code invalide.';
+        gameCode = null;
+      }
+    }
+
+    async function tryLoad() {
+      const r = await fetch('/api/games/' + gameId, { headers: authHeaders() });
+      if (!r.ok) return false;
+      const data = await r.json();
+      me = localStorage.getItem('me_player_id_' + gameId);
+      me = me ? Number(me) : null;
+      if (!me || !data.players.find(p => p.id === me)) {
+        const choice = await pickIdentity(data.players);
+        if (choice) { me = choice; localStorage.setItem('me_player_id_' + gameId, String(me)); }
+      }
+      selectedPlayerId = me || (data.players[0] && data.players[0].id);
+      sock = io();
+      sock.emit('join', { gameId, code: gameCode });
+      sock.on('game:update', d => render(d));
+      sock.on('auth:fail', () => location.reload());
+      document.getElementById('game-root').style.display = 'block';
+      render(data);
+      return true;
+    }
+
+    async function pickIdentity(players) {
+      return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        const box = document.createElement('div');
+        box.className = 'modal-box';
+        box.innerHTML = `<h2 style="margin-top:0">Qui es-tu ?</h2>
+          <p class="muted" style="margin-top:0">Selectionne ton nom dans le flight pour saisir tes scores plus rapidement.</p>` +
+          players.map(p => `<button class="player-pick" data-id="${p.id}">
+            <div class="name">${escapeHtml(p.name)}</div>
+            <div class="muted" style="font-size:13px">Index ${p.handicap} &middot; HCP de jeu ${p.playingHcp}</div>
+          </button>`).join('') +
+          `<button class="secondary" data-skip="1" style="margin-top:8px">Passer</button>`;
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+        box.querySelectorAll('[data-id]').forEach(b => b.addEventListener('click', () => {
+          overlay.remove(); resolve(Number(b.dataset.id));
+        }));
+        box.querySelector('[data-skip]').addEventListener('click', () => { overlay.remove(); resolve(null); });
+      });
+    }
+
+    function render(data) {
+      state = data;
+      document.getElementById('course-name').textContent = data.course.name;
+      const hcount = data.course.holes.length;
+      const loopTag = data.game.loop_twice ? ' (2 tours)' : '';
+      document.getElementById('formula-name').textContent = `${data.formulaLabel} - ${hcount} trous (par ${data.course.par_total})${loopTag}`;
+
+      const psel = document.getElementById('player-select');
+      const prev = selectedPlayerId;
+      psel.innerHTML = data.players.map(p => `<option value="${p.id}">${escapeHtml(p.name)}${p.id === me ? ' (moi)' : ''}</option>`).join('');
+      if (prev && data.players.find(p => p.id === prev)) psel.value = String(prev);
+      else if (data.players[0]) { selectedPlayerId = data.players[0].id; psel.value = String(selectedPlayerId); }
+
+      const hsel = document.getElementById('hole-select');
+      hsel.innerHTML = data.course.holes.map(h => `<option value="${h.num}">Trou ${h.num} (P${h.par}, SI${h.si})</option>`).join('');
+      if (selectedHole > hcount) selectedHole = 1;
+      hsel.value = String(selectedHole);
+      document.getElementById('prev-hole').disabled = selectedHole === 1;
+      document.getElementById('next-hole').disabled = selectedHole === hcount;
+
+      renderHoleInfo(); renderNumpad(); renderLeaderboard(); renderScorecard();
+
+      // Detection fin de partie
+      if (data.game.status === 'closed' && !endShown) {
+        endShown = true;
+        showEndModal();
+      }
+    }
+
+    function renderHoleInfo() {
+      const hole = state.course.holes.find(h => h.num === selectedHole);
+      const player = state.players.find(p => p.id === selectedPlayerId);
+      if (!hole || !player) return;
+      document.getElementById('hole-num').textContent = hole.num;
+      document.getElementById('hole-par').textContent = hole.par;
+      document.getElementById('hole-si').textContent = hole.si;
+      const cur = (state.scores[selectedPlayerId] || {})[selectedHole];
+      const recv = strokesOnHole(player.playingHcp, hole.si);
+      const recvLbl = recv === 0 ? '0' : (recv > 0 ? '+' + recv : String(recv));
+      document.getElementById('hole-strokes-info').textContent =
+        cur != null ? `${player.name} : ${cur} coups (recus ${recvLbl})` : `${player.name} : recus ${recvLbl}`;
+    }
+
+    function renderNumpad() {
+      const cur = (state.scores[selectedPlayerId] || {})[selectedHole];
+      const buttons = [];
+      for (let i = 1; i <= 9; i++) {
+        const active = cur === i ? ' active' : '';
+        buttons.push(`<button class="${active}" data-n="${i}">${i}</button>`);
+      }
+      buttons.push(`<button class="clear" data-clear="1">Effacer</button>`);
+      const np = document.getElementById('numpad');
+      np.innerHTML = buttons.join('');
+      np.querySelectorAll('[data-n]').forEach(b => b.addEventListener('click', () => setScore(Number(b.dataset.n))));
+      np.querySelector('[data-clear]').addEventListener('click', () => setScore(null));
+    }
+
+    async function setScore(strokes) {
+      lastSetCell = `${selectedPlayerId}:${selectedHole}`;
+      try { if (navigator.vibrate) navigator.vibrate(35); } catch (e) {}
+      await fetch(`/api/games/${state.game.id}/scores`, {
+        method: 'POST', headers: {'Content-Type': 'application/json', ...authHeaders()},
+        body: JSON.stringify({ player_id: selectedPlayerId, hole_num: selectedHole, strokes })
+      });
+      if (strokes != null && selectedHole < holesCount()) {
+        selectedHole += 1;
+        document.getElementById('hole-select').value = String(selectedHole);
+      }
+    }
+
+    function renderLeaderboard() {
+      const lb = state.leaderboard;
+      const div = document.getElementById('leaderboard');
+      const hcount = holesCount();
+      if (!lb.length) { div.innerHTML = '<p class="muted">Pas encore de joueurs.</p>'; return; }
+      const showVsPar = state.game.formula.startsWith('stroke');
+      div.innerHTML = `<table><thead><tr>
+        <th class="lb-rank">#</th>
+        <th>Joueur</th>
+        <th class="lb-score">Score</th>
+        ${showVsPar ? '<th class="lb-score">Vs Par</th>' : ''}
+        <th class="lb-score">Trous</th>
+      </tr></thead><tbody>` + lb.map(r => {
+        const meRow = r.playerId === me ? ' me' : '';
+        const rank1 = r.rank === 1 ? ' rank-1' : '';
+        const vp = r.vsPar;
+        const vpClass = vp == null ? '' : (vp < 0 ? 'under' : (vp > 0 ? 'over' : 'even'));
+        const rankCell = r.rank === 1
+          ? `<svg class="trophy" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v3a5 5 0 0010 0V4H7zm-3 1v2a3 3 0 003 3v-1a2 2 0 01-2-2V5H4zm14 0v2a2 2 0 01-2 2v1a3 3 0 003-3V5h-1zM10 14h4v2H10v-2zm-2 4h8v2H8v-2z"/></svg>`
+          : r.rank;
+        return `<tr class="${meRow}${rank1}">
+          <td class="lb-rank">${rankCell}</td>
+          <td>${escapeHtml(r.name)} <span class="muted" style="font-size:12px">(${r.handicap}/${r.playingHcp})</span></td>
+          <td class="lb-score">${escapeHtml(r.scoreLabel)}</td>
+          ${showVsPar ? `<td class="lb-score lb-vp ${vpClass}">${r.vsParLabel}</td>` : ''}
+          <td class="lb-score">${r.holesPlayed}/${hcount}</td>
+        </tr>`;
+      }).join('') + '</tbody></table>';
+    }
+
+    function renderScorecard() {
+      const player = state.players.find(p => p.id === selectedPlayerId);
+      if (!player) return;
+      const playerScores = state.scores[selectedPlayerId] || {};
+      const hcount = holesCount();
+
+      function buildGrid(holesSlice) {
+        const headers = [], scores = [];
+        for (const h of holesSlice) {
+          const s = playerScores[h.num];
+          let cls = 'empty';
+          if (s != null) {
+            const d = s - h.par;
+            if (d <= -2) cls = 'eagle';
+            else if (d === -1) cls = 'birdie';
+            else if (d === 0) cls = 'par';
+            else if (d === 1) cls = 'bogey';
+            else cls = 'dbogey';
+          }
+          const active = h.num === selectedHole ? ' active' : '';
+          const popCls = lastSetCell === `${selectedPlayerId}:${h.num}` ? ' pop' : '';
+          headers.push(`<div class="h">${h.num}<span class="par">P${h.par}</span></div>`);
+          scores.push(`<div class="s ${cls}${active}${popCls}" data-hole="${h.num}">${s != null ? s : '-'}</div>`);
+        }
+        return headers.join('') + scores.join('');
+      }
+
+      const container = document.getElementById('scorecard-container');
+      if (hcount > 9) {
+        const aller = state.course.holes.filter(h => h.num <= 9);
+        const retour = state.course.holes.filter(h => h.num > 9);
+        container.innerHTML = `
+          <div class="muted" style="font-size:12px;margin-top:4px;text-transform:uppercase;letter-spacing:0.5px">Aller (1-9)</div>
+          <div class="scorecard-grid">${buildGrid(aller)}</div>
+          <div class="muted" style="font-size:12px;margin-top:10px;text-transform:uppercase;letter-spacing:0.5px">Retour (10-${hcount})</div>
+          <div class="scorecard-grid">${buildGrid(retour)}</div>
+        `;
+      } else {
+        container.innerHTML = `<div class="scorecard-grid">${buildGrid(state.course.holes)}</div>`;
+      }
+      lastSetCell = null;
+
+      container.querySelectorAll('.scorecard-grid .s').forEach(el => {
+        el.addEventListener('click', () => {
+          selectedHole = Number(el.dataset.hole);
+          document.getElementById('hole-select').value = String(selectedHole);
+          renderHoleInfo(); renderNumpad(); renderScorecard();
+          document.getElementById('prev-hole').disabled = selectedHole === 1;
+          document.getElementById('next-hole').disabled = selectedHole === holesCount();
+        });
+      });
+
+      const lb = state.leaderboard.find(r => r.playerId === selectedPlayerId);
+      const grossTotal = Object.values(playerScores).reduce((s, v) => s + v, 0);
+      const played = Object.keys(playerScores).length;
+      document.getElementById('t-gross').textContent = grossTotal || '-';
+      document.getElementById('t-played').textContent = `${played}/${hcount}`;
+      if (lb) {
+        document.getElementById('t-formula').textContent = lb.scoreLabel;
+        document.getElementById('t-formula-label').textContent = state.formulaLabel.split(' ')[0];
+      }
+    }
+
+    function strokesOnHole(playingHcp, si) {
+      if (playingHcp >= 0) {
+        const base = Math.floor(playingHcp / 18);
+        const extras = playingHcp % 18;
+        return base + (si <= extras ? 1 : 0);
+      } else {
+        const n = -playingHcp;
+        const base = Math.floor(n / 18);
+        const extras = n % 18;
+        return -(base + (si > 18 - extras ? 1 : 0));
+      }
+    }
+
+    document.getElementById('player-select').addEventListener('change', e => {
+      selectedPlayerId = Number(e.target.value);
+      renderHoleInfo(); renderNumpad(); renderScorecard();
+    });
+    document.getElementById('hole-select').addEventListener('change', e => {
+      selectedHole = Number(e.target.value);
+      renderHoleInfo(); renderNumpad(); renderScorecard();
+      document.getElementById('prev-hole').disabled = selectedHole === 1;
+      document.getElementById('next-hole').disabled = selectedHole === holesCount();
+    });
+    document.getElementById('prev-hole').addEventListener('click', () => {
+      if (selectedHole > 1) {
+        selectedHole -= 1;
+        document.getElementById('hole-select').value = String(selectedHole);
+        renderHoleInfo(); renderNumpad(); renderScorecard();
+        document.getElementById('prev-hole').disabled = selectedHole === 1;
+        document.getElementById('next-hole').disabled = false;
+      }
+    });
+    document.getElementById('next-hole').addEventListener('click', () => {
+      if (selectedHole < holesCount()) {
+        selectedHole += 1;
+        document.getElementById('hole-select').value = String(selectedHole);
+        renderHoleInfo(); renderNumpad(); renderScorecard();
+        document.getElementById('prev-hole').disabled = false;
+        document.getElementById('next-hole').disabled = selectedHole === holesCount();
+      }
+    });
+    document.getElementById('finish-btn').addEventListener('click', async () => {
+      if (!confirm('Terminer la partie pour tout le monde ?')) return;
+      await fetch(`/api/games/${state.game.id}/finish`, { method: 'POST', headers: authHeaders() });
+    });
+
+    // ===== Confetti + modal de fin =====
+    function launchConfetti() {
+      const colors = ['#c9a961', '#1a4d2e', '#2d6a3e', '#faf6e9', '#e6d5a8'];
+      const n = 80;
+      for (let i = 0; i < n; i++) {
+        const el = document.createElement('div');
+        el.className = 'confetti';
+        const left = Math.random() * 100;
+        const dx = (Math.random() - 0.5) * 200;
+        const d = (2 + Math.random() * 1.8) + 's';
+        const delay = (Math.random() * 0.6) + 's';
+        const color = colors[Math.floor(Math.random() * colors.length)];
+        el.style.left = left + 'vw';
+        el.style.background = color;
+        el.style.setProperty('--dx', dx + 'px');
+        el.style.setProperty('--d', d);
+        el.style.animationDelay = delay;
+        el.style.transform = `rotate(${Math.random() * 360}deg)`;
+        document.body.appendChild(el);
+        setTimeout(() => el.remove(), 4000);
+      }
+    }
+
+    function showEndModal() {
+      launchConfetti();
+      const lb = state.leaderboard;
+      const showVsPar = state.game.formula.startsWith('stroke');
+      const csvUrl = `/api/games/${state.game.id}/scorecard.csv?code=${encodeURIComponent(gameCode)}`;
+      const printUrl = `/scorecard.html?game=${state.game.id}&code=${encodeURIComponent(gameCode)}`;
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.innerHTML = `<div class="modal-box final-modal">
+        <h2>Partie terminee !</h2>
+        <p class="subtitle">${escapeHtml(state.course.name)} &middot; ${escapeHtml(state.formulaLabel)}</p>
+        <table>
+          <thead><tr><th class="lb-rank">#</th><th>Joueur</th><th class="lb-score">Score</th>${showVsPar ? '<th class="lb-score">Vs Par</th>' : ''}</tr></thead>
+          <tbody>${lb.map(r => `
+            <tr class="${r.rank === 1 ? 'rank-1' : ''}">
+              <td class="lb-rank">${r.rank === 1 ? '<svg class="trophy" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v3a5 5 0 0010 0V4H7zm-3 1v2a3 3 0 003 3v-1a2 2 0 01-2-2V5H4zm14 0v2a2 2 0 01-2 2v1a3 3 0 003-3V5h-1zM10 14h4v2H10v-2zm-2 4h8v2H8v-2z"/></svg>' : r.rank}</td>
+              <td>${escapeHtml(r.name)}</td>
+              <td class="lb-score">${escapeHtml(r.scoreLabel)}</td>
+              ${showVsPar ? `<td class="lb-score lb-vp ${r.vsPar < 0 ? 'under' : r.vsPar > 0 ? 'over' : 'even'}">${r.vsParLabel}</td>` : ''}
+            </tr>`).join('')}</tbody>
+        </table>
+        <div class="actions">
+          <a class="button-link" href="${csvUrl}" download>Telecharger CSV</a>
+          <a class="button-link" href="${printUrl}" target="_blank" rel="noopener">Carte imprimable</a>
+          <a class="button-link secondary full" href="/">Retour au club-house</a>
+        </div>
+      </div>`;
+      document.body.appendChild(overlay);
+    }
+
+    init();
+  </script>
+</body>
+</html>
