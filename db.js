@@ -59,6 +59,14 @@ if (!playerCols.includes('position')) {
   db.exec("ALTER TABLE players ADD COLUMN position INTEGER NOT NULL DEFAULT 0");
   db.exec("UPDATE players SET position = id WHERE position = 0");
 }
+if (!playerCols.includes('tee_color')) {
+  db.exec("ALTER TABLE players ADD COLUMN tee_color TEXT");
+}
+
+const courseCols = db.prepare("PRAGMA table_info(courses)").all().map(c => c.name);
+if (!courseCols.includes('tees_json')) {
+  db.exec("ALTER TABLE courses ADD COLUMN tees_json TEXT");
+}
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_games_status ON games(status)`);
 

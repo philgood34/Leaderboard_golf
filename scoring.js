@@ -2,14 +2,16 @@
 // et calcul du classement pour chaque formule.
 
 const FORMULAS = {
-  STROKE_BRUT: 'stroke_brut',
-  STROKE_NET:  'stroke_net',
+  STROKE:      'stroke',
+  STROKE_BRUT: 'stroke_brut', // legacy : conserve pour parties pre-fusion
+  STROKE_NET:  'stroke_net',  // legacy : conserve pour parties pre-fusion
   MATCH_BRUT:  'match_brut',
   MATCH_NET:   'match_net',
   CHICAGO:     'chicago'
 };
 
 const FORMULA_LABELS = {
+  stroke:      'Stroke Play',
   stroke_brut: 'Stroke Play Brut',
   stroke_net:  'Stroke Play Net',
   match_brut:  'Matchplay Brut',
@@ -50,14 +52,24 @@ function chicagoPoints(grossStrokes, par) {
   return 1; // bogey ou pire
 }
 
+// Points Stableford : pts = max(0, 2 - (score - par))
+//   eagle (-2) = 4 pts, birdie (-1) = 3 pts, par = 2 pts, bogey (+1) = 1 pt, double+ = 0
+function stablefordPoints(score, par) {
+  return Math.max(0, 2 - (score - par));
+}
+
 // Construit le classement.
 // course = { par_total, slope, sss, holes: [{num, par, si}] }
-// players = [{ id, name, sex, handicap }]
+// players = [{ id, name, sex, handicap, slope?, sss? }]
+//   - p.slope/p.sss : valeurs du tee choisi par le joueur (si disponible)
+//   - sinon fallback sur course.slope/course.sss (parties pre-multitee)
 // scoresByPlayer = { [playerId]: { [holeNum]: strokes } }
 function computeLeaderboard(course, formula, players, scoresByPlayer) {
   const holes = course.holes;
   const enriched = players.map(p => {
-    const playingHcp = playingHandicap(p.handicap, course.slope, course.sss, course.par_total);
+    const slope = p.slope != null ? p.slope : course.slope;
+    const sss   = p.sss   != null ? p.sss   : course.sss;
+    const playingHcp = playingHandicap(p.handicap, slope, sss, course.par_total);
     const playerScores = scoresByPlayer[p.id] || {};
     const perHole = holes.map(h => {
       const strokes = playerScores[h.num];
@@ -89,6 +101,8 @@ function computeLeaderboard(course, formula, players, scoresByPlayer) {
   });
 
   switch (formula) {
+    case FORMULAS.STROKE:
+      return rankStrokeBoth(enriched);
     case FORMULAS.STROKE_BRUT:
       return rankStroke(enriched, 'gross', course.par_total);
     case FORMULAS.STROKE_NET:
@@ -102,6 +116,50 @@ function computeLeaderboard(course, formula, players, scoresByPlayer) {
     default:
       throw new Error(`Formule inconnue : ${formula}`);
   }
+}
+
+// Stroke Play combine : calcule les deux totaux (brut + net) et trie par brut.
+// Vs Par est calcule sur le brut. Stableford brut + net sont aussi calcules
+// pour la vue alternative cote frontend.
+function rankStrokeBoth(enriched) {
+  const rows = enriched.map(p => {
+    const parPlayed = p.perHole
+      .filter(h => h.strokes != null)
+      .reduce((s, h) => s + h.par, 0);
+    const grossTotal = p.grossTotal;
+    const netTotal   = p.netTotal;
+    const grossLabel = p.holesPlayed === 0 ? '-' : String(grossTotal);
+    const netLabel   = p.holesPlayed === 0 ? '-' : String(netTotal);
+    const vsPar = grossTotal - parPlayed;
+    const vsParLabel = p.holesPlayed === 0 ? '-' : (vsPar === 0 ? 'E' : (vsPar > 0 ? `+${vsPar}` : `${vsPar}`));
+    const stbBrut = p.perHole
+      .filter(h => h.strokes != null)
+      .reduce((s, h) => s + stablefordPoints(h.strokes, h.par), 0);
+    const stbNet = p.perHole
+      .filter(h => h.strokes != null)
+      .reduce((s, h) => s + stablefordPoints(h.net, h.par), 0);
+    return {
+      playerId: p.id,
+      name: p.name,
+      handicap: p.handicap,
+      playingHcp: p.playingHcp,
+      holesPlayed: p.holesPlayed,
+      // score = brut (sert au tri et au scoreLabel "principal")
+      score: grossTotal,
+      scoreLabel: grossLabel,
+      grossLabel,
+      netLabel,
+      vsPar,
+      vsParLabel,
+      stbBrut,
+      stbNet,
+      stbBrutLabel: p.holesPlayed === 0 ? '-' : String(stbBrut),
+      stbNetLabel:  p.holesPlayed === 0 ? '-' : String(stbNet),
+      sortKey: p.holesPlayed === 0 ? Infinity : grossTotal
+    };
+  });
+  rows.sort((a, b) => a.sortKey - b.sortKey);
+  return assignRanks(rows);
 }
 
 function rankStroke(enriched, mode, parTotal) {
@@ -178,12 +236,12 @@ function rankMatchplayStandard(enriched, holes, useNet) {
       const absD = Math.abs(closedDiff);
       const tag = closedRemaining === 0 ? `${absD} up` : `${absD}&${closedRemaining}`;
       if (closedDiff > 0) {
-        labelP1 = `Gagne ${tag}`;
-        labelP2 = `Perd ${tag}`;
+        labelP1 = tag;
+        labelP2 = '';
         leaderId = p1.id;
       } else {
-        labelP1 = `Perd ${tag}`;
-        labelP2 = `Gagne ${tag}`;
+        labelP1 = '';
+        labelP2 = tag;
         leaderId = p2.id;
       }
     } else if (holesPlayedTogether === totalHoles) {
@@ -195,12 +253,12 @@ function rankMatchplayStandard(enriched, holes, useNet) {
         status = 'final';
         const absD = Math.abs(diff);
         if (diff > 0) {
-          labelP1 = `Gagne ${absD} up`;
-          labelP2 = `Perd ${absD}`;
+          labelP1 = `${absD} up`;
+          labelP2 = '';
           leaderId = p1.id;
         } else {
-          labelP1 = `Perd ${absD}`;
-          labelP2 = `Gagne ${absD} up`;
+          labelP1 = '';
+          labelP2 = `${absD} up`;
           leaderId = p2.id;
         }
       }
@@ -212,12 +270,12 @@ function rankMatchplayStandard(enriched, holes, useNet) {
       } else {
         const absD = Math.abs(diff);
         if (diff > 0) {
-          labelP1 = `${absD} UP`;
-          labelP2 = `${absD} DOWN`;
+          labelP1 = `${absD} up`;
+          labelP2 = '';
           leaderId = p1.id;
         } else {
-          labelP1 = `${absD} DOWN`;
-          labelP2 = `${absD} UP`;
+          labelP1 = '';
+          labelP2 = `${absD} up`;
           leaderId = p2.id;
         }
       }

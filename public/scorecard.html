@@ -91,17 +91,21 @@
     }
 
     function renderStandardRanking(d) {
+      const isStrokeBoth = d.game.formula === 'stroke';
       const showVsPar = d.game.formula.startsWith('stroke');
       document.getElementById('ranking').innerHTML = `<table><thead><tr>
         <th class="lb-rank">#</th><th>Joueur</th><th class="lb-score">Index</th><th class="lb-score">Jeu</th>
-        <th class="lb-score">Score</th>${showVsPar ? '<th class="lb-score">Vs Par</th>' : ''}
+        ${isStrokeBoth ? '<th class="lb-score">Brut</th><th class="lb-score">Net</th>' : '<th class="lb-score">Score</th>'}
+        ${showVsPar ? '<th class="lb-score">Vs Par</th>' : ''}
       </tr></thead><tbody>${d.leaderboard.map(r => `
         <tr class="${r.rank === 1 ? 'rank-1' : ''}">
           <td class="lb-rank">${r.rank}</td>
           <td>${escapeHtml(r.name)}</td>
           <td class="lb-score">${r.handicap}</td>
           <td class="lb-score">${r.playingHcp}</td>
-          <td class="lb-score">${escapeHtml(r.scoreLabel)}</td>
+          ${isStrokeBoth
+            ? `<td class="lb-score"><strong>${escapeHtml(r.grossLabel)}</strong></td><td class="lb-score">${escapeHtml(r.netLabel)}</td>`
+            : `<td class="lb-score">${escapeHtml(r.scoreLabel)}</td>`}
           ${showVsPar ? `<td class="lb-score lb-vp ${r.vsPar < 0 ? 'under' : r.vsPar > 0 ? 'over' : 'even'}">${r.vsParLabel}</td>` : ''}
         </tr>`).join('')}</tbody></table>`;
     }
@@ -153,12 +157,12 @@
         const slice = holes.filter(h => h.num >= from && h.num <= to);
         const labels = ['Trou', ...slice.map(h => h.num), 'Total'];
         const pars   = ['Par',  ...slice.map(h => h.par), slice.reduce((s, h) => s + h.par, 0)];
-        const sis    = ['SI',   ...slice.map(h => h.si),  ''];
+        const sis    = ['Difficulté',   ...slice.map(h => h.si),  ''];
         const recvs  = ['Reçus', ...slice.map(h => {
           const r = strokesOnHole(p.playingHcp, h.si);
           if (r === 0) return '';
-          if (r > 0) return '•'.repeat(Math.min(r, 3));
-          return '−';
+          if (r > 0) return `+${r}`;
+          return String(r);
         }), slice.reduce((s, h) => s + Math.max(0, strokesOnHole(p.playingHcp, h.si)), 0) || ''];
         const scores = ['Score', ...slice.map(h => ps[h.num] != null ? ps[h.num] : '-'), slice.reduce((s, h) => s + (ps[h.num] || 0), 0) || '-'];
         const cell = (v, cls) => `<div class="${cls || ''}">${v}</div>`;
@@ -182,7 +186,7 @@
       return `<div class="card">
         <div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
           <div>
-            <div style="font-family:Georgia,serif;font-size:18px;font-weight:700;color:#1a4d2e">${escapeHtml(p.name)} <span class="muted" style="font-size:12px">(${p.sex})</span></div>
+            <div style="font-family:Georgia,serif;font-size:18px;font-weight:700;color:#1a4d2e">${escapeHtml(p.name)} <span class="muted" style="font-size:12px">(${p.sex === 'M' ? 'H' : 'F'})</span></div>
             <div class="muted" style="font-size:13px">Index ${p.handicap} &middot; HCP de jeu ${p.playingHcp}</div>
           </div>
           <div style="text-align:right">

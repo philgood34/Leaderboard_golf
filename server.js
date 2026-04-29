@@ -25,20 +25,45 @@ app.use(express.static(path.join(__dirname, 'public')));
 function getCourseRow(id) {
   const row = db.prepare('SELECT * FROM courses WHERE id = ?').get(id);
   if (!row) return null;
-  return { ...row, holes: JSON.parse(row.holes_json) };
+  return {
+    ...row,
+    holes: JSON.parse(row.holes_json),
+    tees: row.tees_json ? JSON.parse(row.tees_json) : []
+  };
+}
+
+// Trouve le tee correspondant a (sex, color) dans course.tees.
+// Renvoie null si non trouve (le caller utilisera un fallback course.slope/sss).
+function findTee(course, sex, color) {
+  if (!course.tees || !color) return null;
+  return course.tees.find(t => t.sex === sex && t.color === color) || null;
 }
 
 // Si loop_twice : on duplique les 9 trous en 1-9 + 10-18, on double par/SSS/slope.
 // Le scoring travaille ensuite de maniere transparente sur 18 trous.
+// Les valeurs slope/sss des tees sont aussi doublees pour la coherence.
+//
+// SI : convention FFGolf pour les 9 trous joues 2 fois en 18T.
+//   1er passage (trous 1-9)  : SI_18T = SI_9T * 2 - 1 (impairs)
+//   2eme passage (trous 10-18) : SI_18T = SI_9T * 2     (pairs)
+//   Ainsi chaque trou physique a 2 SI distincts (1 par passage), et les 18 SI
+//   couvrent bien 1..18 sans doublon.
 function getEffectiveCourse(course, loopTwice) {
   if (!loopTwice || course.holes.length !== 9) return course;
-  const second = course.holes.map(h => ({ num: h.num + 9, par: h.par, si: h.si }));
+  const first  = course.holes.map(h => ({ num: h.num,     par: h.par, si: h.si * 2 - 1 }));
+  const second = course.holes.map(h => ({ num: h.num + 9, par: h.par, si: h.si * 2     }));
+  const teesDoubled = (course.tees || []).map(t => ({
+    ...t,
+    slope: t.slope * 2,
+    sss: Math.round(t.sss * 2 * 10) / 10
+  }));
   return {
     ...course,
     par_total: course.par_total * 2,
     sss: Math.round(course.sss * 2 * 10) / 10,
     slope: course.slope * 2,
-    holes: course.holes.concat(second)
+    holes: first.concat(second),
+    tees: teesDoubled
   };
 }
 
@@ -65,12 +90,22 @@ function getGameFull(gameId) {
     scoresByPlayer[s.player_id][s.hole_num] = s.strokes;
   }
 
-  const playersEnriched = players.map(p => ({
+  // Enrichit chaque joueur avec slope/sss du tee choisi (fallback course par defaut)
+  const playersWithTee = players.map(p => {
+    const tee = findTee(course, p.sex, p.tee_color);
+    return {
+      ...p,
+      slope: tee ? tee.slope : course.slope,
+      sss:   tee ? tee.sss   : course.sss
+    };
+  });
+
+  const playersEnriched = playersWithTee.map(p => ({
     ...p,
-    playingHcp: playingHandicap(p.handicap, course.slope, course.sss, course.par_total)
+    playingHcp: playingHandicap(p.handicap, p.slope, p.sss, course.par_total)
   }));
 
-  const leaderboard = computeLeaderboard(course, game.formula, players, scoresByPlayer);
+  const leaderboard = computeLeaderboard(course, game.formula, playersWithTee, scoresByPlayer);
 
   return {
     game,
@@ -111,7 +146,7 @@ function requireGameAuth(req, res, next) {
 // ---------- API publiques ----------
 
 app.get('/api/courses', (req, res) => {
-  const rows = db.prepare('SELECT id, name, city, par_total, slope, sss, holes_json FROM courses ORDER BY name').all();
+  const rows = db.prepare('SELECT id, name, city, par_total, slope, sss, holes_json, tees_json FROM courses ORDER BY name').all();
   const out = rows.map(r => ({
     id: r.id,
     name: r.name,
@@ -119,7 +154,8 @@ app.get('/api/courses', (req, res) => {
     par_total: r.par_total,
     slope: r.slope,
     sss: r.sss,
-    holes_count: JSON.parse(r.holes_json).length
+    holes_count: JSON.parse(r.holes_json).length,
+    tees: r.tees_json ? JSON.parse(r.tees_json) : []
   }));
   res.json(out);
 });
@@ -205,15 +241,15 @@ app.get('/api/games/:id', requireGameAuth, (req, res) => {
 
 app.post('/api/games/:id/players', requireGameAuth, (req, res) => {
   const gameId = Number(req.params.id);
-  const { name, sex, handicap } = req.body;
+  const { name, sex, handicap, tee_color } = req.body;
   if (!name || !sex || handicap == null) return res.status(400).json({ error: 'name, sex, handicap requis' });
   if (!['M', 'F'].includes(sex)) return res.status(400).json({ error: 'sex doit etre M ou F' });
   const hcp = Number(handicap);
   if (Number.isNaN(hcp)) return res.status(400).json({ error: 'handicap invalide' });
 
   const maxPos = db.prepare('SELECT COALESCE(MAX(position), 0) AS m FROM players WHERE game_id = ?').get(gameId).m;
-  const r = db.prepare(`INSERT INTO players (game_id, name, sex, handicap, position) VALUES (?, ?, ?, ?, ?)`)
-    .run(gameId, name.trim(), sex, hcp, maxPos + 1);
+  const r = db.prepare(`INSERT INTO players (game_id, name, sex, handicap, position, tee_color) VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(gameId, name.trim(), sex, hcp, maxPos + 1, tee_color || null);
 
   broadcastGame(gameId);
   res.json({ id: r.lastInsertRowid });
@@ -323,7 +359,7 @@ function buildCsv(data) {
     lines.push([
       r.rank,
       r.name,
-      player ? player.sex : '',
+      player ? (player.sex === 'M' ? 'H' : 'F') : '',
       r.handicap,
       r.playingHcp,
       r.holesPlayed,

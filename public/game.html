@@ -13,7 +13,7 @@
     <h2 style="margin-top:0">Code requis</h2>
     <p class="muted">Cette partie est protegee par un code 4 chiffres. Demande-le a l'organisateur.</p>
     <label>Code</label>
-    <input type="text" id="auth-code" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" style="font-size:24px;text-align:center;letter-spacing:8px;font-family:Georgia,serif">
+    <input type="text" id="auth-code" name="game-access-code" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" data-form-type="other" data-lpignore="true" data-1p-ignore="true" data-bwignore style="font-size:24px;text-align:center;letter-spacing:8px;font-family:Georgia,serif">
     <button id="auth-submit" class="gold" style="margin-top:10px">Rejoindre</button>
     <div id="auth-error" class="error"></div>
   </div>
@@ -39,6 +39,7 @@
         </svg>
         Leaderboard
       </h2>
+      <button id="toggle-lb-stableford" class="secondary" style="margin-bottom:10px;width:100%;display:none">Score en stableford</button>
       <div id="leaderboard"></div>
     </div>
 
@@ -54,7 +55,7 @@
           <span class="h-num" id="hole-num">1</span>
         </div>
         <div class="h-meta" style="text-align:right">
-          Par <strong id="hole-par">-</strong> &middot; SI <strong id="hole-si">-</strong><br>
+          Par <strong id="hole-par">-</strong> &middot; Difficulté <strong id="hole-si">-</strong><br>
           <span id="hole-strokes-info" style="font-size:12px"></span>
         </div>
       </div>
@@ -67,7 +68,10 @@
 
       <div class="numpad-wrap">
         <div class="numpad" id="numpad"></div>
+        <div id="stableford-help" style="display:none"></div>
       </div>
+
+      <button id="toggle-help" class="secondary" style="margin-top:10px;width:100%">Aide stableford NET</button>
     </div>
 
     <div class="card">
@@ -95,6 +99,7 @@
     let gameCode = null;
     let lastSetCell = null;
     let endShown = false;
+    let lbViewStableford = false;
 
     function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);}
     function authHeaders() { return { 'X-Game-Code': gameCode }; }
@@ -197,13 +202,13 @@
       else if (data.players[0]) { selectedPlayerId = data.players[0].id; psel.value = String(selectedPlayerId); }
 
       const hsel = document.getElementById('hole-select');
-      hsel.innerHTML = data.course.holes.map(h => `<option value="${h.num}">Trou ${h.num} (P${h.par}, SI${h.si})</option>`).join('');
+      hsel.innerHTML = data.course.holes.map(h => `<option value="${h.num}">Trou ${h.num} (P${h.par}, Diff. ${h.si})</option>`).join('');
       if (selectedHole > hcount) selectedHole = 1;
       hsel.value = String(selectedHole);
       document.getElementById('prev-hole').disabled = selectedHole === 1;
       document.getElementById('next-hole').disabled = selectedHole === hcount;
 
-      renderHoleInfo(); renderNumpad(); renderLeaderboard(); renderScorecard();
+      renderHoleInfo(); renderNumpad(); renderStablefordHelp(); renderLeaderboard(); renderScorecard();
 
       // Detection fin de partie
       if (data.game.status === 'closed' && !endShown) {
@@ -240,6 +245,54 @@
       np.querySelector('[data-clear]').addEventListener('click', () => setScore(null));
     }
 
+    // Stableford net : pts = max(0, 2 - (net_score - par)) avec net = brut - coups recus.
+    // 0 pt des que net_score >= par + 2  =>  brut >= par + 2 + coups_recus.
+    // Le joueur peut ramasser des qu'il a joue (par + 1 + coups_recus) coups sans rentrer
+    // (son prochain coup donnera deja 0 pt).
+    function renderStablefordHelp() {
+      const div = document.getElementById('stableford-help');
+      const hole = state.course.holes.find(h => h.num === selectedHole);
+      const player = state.players.find(p => p.id === selectedPlayerId);
+      if (!hole || !player) { div.innerHTML = ''; return; }
+      const recv = strokesOnHole(player.playingHcp, hole.si);
+      const recvLbl = recv === 0 ? '0' : (recv > 0 ? '+' + recv : String(recv));
+      const parNet = hole.par + recv;
+      // Seuil = coups joues a partir duquel le prochain coup donnera 0 pt.
+      const pickupAt = hole.par + 1 + recv;
+
+      div.innerHTML = `
+        <div style="background:#faf6e9;border-radius:8px;padding:14px;border-left:3px solid #c9a961">
+          <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:#1a4d2e;font-weight:700;margin-bottom:10px">
+            Stableford net &middot; Trou ${hole.num}
+          </div>
+          <div style="font-size:14px;margin-bottom:8px">
+            Par <strong>${hole.par}</strong> &middot; coups reçus <strong>${recvLbl}</strong>
+          </div>
+          <div style="font-size:16px;margin-bottom:12px;color:#1a4d2e">
+            Par net : <strong style="font-size:20px">${parNet}</strong>
+          </div>
+          <div style="padding:10px;background:#fff3e0;border-radius:6px;font-size:13px;color:#6b2a2a">
+            💡 Si tu as joué <strong>${pickupAt} coups</strong> sans rentrer la balle, le prochain coup donnera 0 point. Tu peux ramasser et marquer une croix.
+          </div>
+        </div>`;
+    }
+
+    document.getElementById('toggle-help').addEventListener('click', () => {
+      const np = document.getElementById('numpad');
+      const help = document.getElementById('stableford-help');
+      const btn = document.getElementById('toggle-help');
+      const showingHelp = help.style.display !== 'none';
+      if (showingHelp) {
+        help.style.display = 'none';
+        np.style.display = '';
+        btn.textContent = 'Aide stableford NET';
+      } else {
+        help.style.display = '';
+        np.style.display = 'none';
+        btn.textContent = 'Saisir un score';
+      }
+    });
+
     async function setScore(strokes) {
       lastSetCell = `${selectedPlayerId}:${selectedHole}`;
       try { if (navigator.vibrate) navigator.vibrate(35); } catch (e) {}
@@ -262,20 +315,48 @@
       const div = document.getElementById('leaderboard');
       if (!lb.length) { div.innerHTML = '<p class="muted">Pas encore de joueurs.</p>'; return; }
 
+      // Affiche/masque le bouton stableford selon la formule
+      const isStrokeBoth = state.game.formula === 'stroke';
+      const stbBtn = document.getElementById('toggle-lb-stableford');
+      stbBtn.style.display = isStrokeBoth ? '' : 'none';
+      if (!isStrokeBoth) lbViewStableford = false;
+
       if (isMatchplay()) {
         renderMatchplayLeaderboard(div, lb);
         return;
       }
 
       const hcount = holesCount();
-      const showVsPar = state.game.formula.startsWith('stroke');
+      const showVsPar = state.game.formula.startsWith('stroke') && !lbViewStableford;
+
+      // En vue stableford, on retrie par stbNet desc et on recalcule les rangs
+      let rows = lb;
+      if (isStrokeBoth && lbViewStableford) {
+        rows = [...lb].sort((a, b) => {
+          const aPlayed = a.holesPlayed > 0;
+          const bPlayed = b.holesPlayed > 0;
+          if (!aPlayed && !bPlayed) return 0;
+          if (!aPlayed) return 1;
+          if (!bPlayed) return -1;
+          return b.stbNet - a.stbNet;
+        });
+        let lastKey = null, lastRank = 0;
+        rows = rows.map((r, i) => {
+          const key = r.holesPlayed === 0 ? 'none' : r.stbNet;
+          if (key !== lastKey) { lastRank = i + 1; lastKey = key; }
+          return { ...r, rank: lastRank };
+        });
+      }
+
       div.innerHTML = `<table><thead><tr>
         <th class="lb-rank">#</th>
         <th>Joueur</th>
-        <th class="lb-score">Score</th>
+        ${isStrokeBoth && lbViewStableford
+          ? '<th class="lb-score">Stb Brut</th><th class="lb-score">Stb Net</th>'
+          : (isStrokeBoth ? '<th class="lb-score">Brut</th><th class="lb-score">Net</th>' : '<th class="lb-score">Score</th>')}
         ${showVsPar ? '<th class="lb-score">Vs Par</th>' : ''}
         <th class="lb-score">Trous</th>
-      </tr></thead><tbody>` + lb.map(r => {
+      </tr></thead><tbody>` + rows.map(r => {
         const meRow = r.playerId === me ? ' me' : '';
         const rank1 = r.rank === 1 ? ' rank-1' : '';
         const vp = r.vsPar;
@@ -286,12 +367,22 @@
         return `<tr class="${meRow}${rank1}">
           <td class="lb-rank">${rankCell}</td>
           <td>${escapeHtml(r.name)} <span class="muted" style="font-size:12px">(${r.handicap}/${r.playingHcp})</span></td>
-          <td class="lb-score">${escapeHtml(r.scoreLabel)}</td>
+          ${isStrokeBoth && lbViewStableford
+            ? `<td class="lb-score">${escapeHtml(r.stbBrutLabel)}</td><td class="lb-score"><strong>${escapeHtml(r.stbNetLabel)}</strong></td>`
+            : (isStrokeBoth
+                ? `<td class="lb-score"><strong>${escapeHtml(r.grossLabel)}</strong></td><td class="lb-score">${escapeHtml(r.netLabel)}</td>`
+                : `<td class="lb-score">${escapeHtml(r.scoreLabel)}</td>`)}
           ${showVsPar ? `<td class="lb-score lb-vp ${vpClass}">${r.vsParLabel}</td>` : ''}
           <td class="lb-score">${r.holesPlayed}/${hcount}</td>
         </tr>`;
       }).join('') + '</tbody></table>';
     }
+
+    document.getElementById('toggle-lb-stableford').addEventListener('click', () => {
+      lbViewStableford = !lbViewStableford;
+      document.getElementById('toggle-lb-stableford').textContent = lbViewStableford ? 'Score brut / net' : 'Score en stableford';
+      renderLeaderboard();
+    });
 
     function renderMatchplayLeaderboard(div, lb) {
       const matches = {};
@@ -356,10 +447,9 @@
           const recv = strokesOnHole(player.playingHcp, h.si);
           let recvBadge = '';
           if (recv > 0) {
-            const dots = '•'.repeat(Math.min(recv, 3));
-            recvBadge = `<span class="recv-badge" title="Coup${recv > 1 ? 's' : ''} reçu${recv > 1 ? 's' : ''} : ${recv}">${dots}</span>`;
+            recvBadge = `<span class="recv-badge" title="Coup${recv > 1 ? 's' : ''} reçu${recv > 1 ? 's' : ''} : ${recv}">+${recv}</span>`;
           } else if (recv < 0) {
-            recvBadge = `<span class="recv-badge gives" title="Coup donné">−</span>`;
+            recvBadge = `<span class="recv-badge gives" title="Coup${recv < -1 ? 's' : ''} donné${recv < -1 ? 's' : ''} : ${-recv}">${recv}</span>`;
           }
           headers.push(`<div class="h">${h.num}<span class="par">P${h.par}</span></div>`);
           scores.push(`<div class="s ${cls}${active}${popCls}" data-hole="${h.num}">${s != null ? s : '-'}${recvBadge}</div>`);
@@ -386,7 +476,7 @@
         el.addEventListener('click', () => {
           selectedHole = Number(el.dataset.hole);
           document.getElementById('hole-select').value = String(selectedHole);
-          renderHoleInfo(); renderNumpad(); renderScorecard();
+          renderHoleInfo(); renderNumpad(); renderStablefordHelp(); renderScorecard();
           document.getElementById('prev-hole').disabled = selectedHole === 1;
           document.getElementById('next-hole').disabled = selectedHole === holesCount();
         });
@@ -418,11 +508,11 @@
 
     document.getElementById('player-select').addEventListener('change', e => {
       selectedPlayerId = Number(e.target.value);
-      renderHoleInfo(); renderNumpad(); renderScorecard();
+      renderHoleInfo(); renderNumpad(); renderStablefordHelp(); renderScorecard();
     });
     document.getElementById('hole-select').addEventListener('change', e => {
       selectedHole = Number(e.target.value);
-      renderHoleInfo(); renderNumpad(); renderScorecard();
+      renderHoleInfo(); renderNumpad(); renderStablefordHelp(); renderScorecard();
       document.getElementById('prev-hole').disabled = selectedHole === 1;
       document.getElementById('next-hole').disabled = selectedHole === holesCount();
     });
@@ -430,7 +520,7 @@
       if (selectedHole > 1) {
         selectedHole -= 1;
         document.getElementById('hole-select').value = String(selectedHole);
-        renderHoleInfo(); renderNumpad(); renderScorecard();
+        renderHoleInfo(); renderNumpad(); renderStablefordHelp(); renderScorecard();
         document.getElementById('prev-hole').disabled = selectedHole === 1;
         document.getElementById('next-hole').disabled = false;
       }
@@ -439,7 +529,7 @@
       if (selectedHole < holesCount()) {
         selectedHole += 1;
         document.getElementById('hole-select').value = String(selectedHole);
-        renderHoleInfo(); renderNumpad(); renderScorecard();
+        renderHoleInfo(); renderNumpad(); renderStablefordHelp(); renderScorecard();
         document.getElementById('prev-hole').disabled = false;
         document.getElementById('next-hole').disabled = selectedHole === holesCount();
       }
@@ -475,6 +565,7 @@
     function showEndModal() {
       launchConfetti();
       const lb = state.leaderboard;
+      const isStrokeBoth = state.game.formula === 'stroke';
       const showVsPar = state.game.formula.startsWith('stroke');
       const csvUrl = `/api/games/${state.game.id}/scorecard.csv?code=${encodeURIComponent(gameCode)}`;
       const printUrl = `/scorecard.html?game=${state.game.id}&code=${encodeURIComponent(gameCode)}`;
@@ -505,12 +596,14 @@
         }).join('')}</div>`;
       } else {
         resultsHtml = `<table>
-          <thead><tr><th class="lb-rank">#</th><th>Joueur</th><th class="lb-score">Score</th>${showVsPar ? '<th class="lb-score">Vs Par</th>' : ''}</tr></thead>
+          <thead><tr><th class="lb-rank">#</th><th>Joueur</th>${isStrokeBoth ? '<th class="lb-score">Brut</th><th class="lb-score">Net</th>' : '<th class="lb-score">Score</th>'}${showVsPar ? '<th class="lb-score">Vs Par</th>' : ''}</tr></thead>
           <tbody>${lb.map(r => `
             <tr class="${r.rank === 1 ? 'rank-1' : ''}">
               <td class="lb-rank">${r.rank === 1 ? '<svg class="trophy" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v3a5 5 0 0010 0V4H7zm-3 1v2a3 3 0 003 3v-1a2 2 0 01-2-2V5H4zm14 0v2a2 2 0 01-2 2v1a3 3 0 003-3V5h-1zM10 14h4v2H10v-2zm-2 4h8v2H8v-2z"/></svg>' : r.rank}</td>
               <td>${escapeHtml(r.name)}</td>
-              <td class="lb-score">${escapeHtml(r.scoreLabel)}</td>
+              ${isStrokeBoth
+                ? `<td class="lb-score"><strong>${escapeHtml(r.grossLabel)}</strong></td><td class="lb-score">${escapeHtml(r.netLabel)}</td>`
+                : `<td class="lb-score">${escapeHtml(r.scoreLabel)}</td>`}
               ${showVsPar ? `<td class="lb-score lb-vp ${r.vsPar < 0 ? 'under' : r.vsPar > 0 ? 'over' : 'even'}">${r.vsParLabel}</td>` : ''}
             </tr>`).join('')}</tbody>
         </table>`;

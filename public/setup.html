@@ -31,10 +31,9 @@
 
     <h2 style="margin-top:20px">2. Formule de jeu</h2>
     <select id="formula-select">
-      <option value="stroke_brut">Stroke Play Brut</option>
-      <option value="stroke_net" selected>Stroke Play Net</option>
-      <option value="match_brut">Matchplay Brut (skins)</option>
-      <option value="match_net">Matchplay Net (skins)</option>
+      <option value="stroke" selected>Stroke Play</option>
+      <option value="match_brut">Matchplay Brut</option>
+      <option value="match_net">Matchplay Net</option>
       <option value="chicago">Chicago</option>
     </select>
 
@@ -58,13 +57,16 @@
     <div class="card cream" style="margin:0; padding: 14px; border-left: none; box-shadow: none">
       <h2 style="margin-top:0">Ajouter un joueur</h2>
       <label>Nom</label>
-      <input type="text" id="p-name" placeholder="Prenom" autocomplete="off">
+      <input type="text" id="p-name" name="player-display-name" placeholder="Prenom" autocomplete="off" data-form-type="other" data-lpignore="true" data-1p-ignore="true" data-bwignore>
 
       <label>Sexe</label>
       <select id="p-sex">
         <option value="M">Homme</option>
         <option value="F">Femme</option>
       </select>
+
+      <label>Depart (couleur)</label>
+      <select id="p-tee"></select>
 
       <label>Index (HCP)</label>
       <input type="number" id="p-hcp" step="0.1" placeholder="Ex: 18.4" inputmode="decimal">
@@ -97,18 +99,32 @@
       renderCourseList();
     }
 
+    // Cherche le slope pour (sex, color preferee). Si absent, fallback sur le 1er tee
+    // disponible pour ce sexe. Renvoie { color, slope } ou null si aucun tee dispo.
+    function preferredTeeSlope(course, sex, preferred) {
+      const tees = (course.tees || []).filter(t => t.sex === sex);
+      if (!tees.length) return null;
+      const exact = tees.find(t => t.color === preferred);
+      const tee = exact || tees[0];
+      return { color: tee.color, slope: tee.slope };
+    }
+
     function renderCourseList() {
       const div = document.getElementById('course-list');
       div.innerHTML = courses.map(c => {
         const sel = c.id === selectedCourseId ? ' selected' : '';
+        const teeH = preferredTeeSlope(c, 'M', 'jaune');
+        const teeF = preferredTeeSlope(c, 'F', 'bleu');
+        const slopeH = teeH ? `Slope H ${TEE_LABELS[teeH.color] || teeH.color} : ${teeH.slope}` : '';
+        const slopeF = teeF ? `Slope F ${TEE_LABELS[teeF.color] || teeF.color} : ${teeF.slope}` : '';
         return `<div class="course-card${sel}" data-id="${c.id}" data-holes="${c.holes_count}">
           <div class="c-name">${escapeHtml(c.name)}</div>
           <div class="c-meta">
             <span class="tag">${escapeHtml(c.city || '')}</span>
             <span class="tag primary">${c.holes_count} trous</span>
             <span class="tag">Par ${c.par_total}</span>
-            <span class="tag">SSS ${c.sss}</span>
-            <span class="tag">Slope ${c.slope}</span>
+            ${slopeH ? `<span class="tag">${slopeH}</span>` : ''}
+            ${slopeF ? `<span class="tag">${slopeF}</span>` : ''}
           </div>
         </div>`;
       }).join('');
@@ -185,6 +201,9 @@
 
     function showPlayersStep(data) {
       gameFormula = data.game && data.game.formula;
+      // S'assure que selectedCourseId pointe sur le parcours de la partie en cours
+      if (data.game && data.game.course_id) selectedCourseId = data.game.course_id;
+      refreshTeeSelect();
       document.getElementById('step-players').style.display = 'block';
       renderPlayers(data.players || []);
       const sock = io();
@@ -201,13 +220,15 @@
 
       const isMatchplay = gameFormula && gameFormula.startsWith('match_');
 
+      const teeLbl = p => p.tee_color ? (TEE_LABELS[p.tee_color] || p.tee_color) : '-';
       let html = `<table>
-        <thead><tr><th>${isMatchplay ? '#' : 'Joueur'}</th><th>${isMatchplay ? 'Joueur' : 'Sexe'}</th><th class="lb-score">Index</th><th class="lb-score">Jeu</th><th></th></tr></thead>
+        <thead><tr><th>${isMatchplay ? '#' : 'Joueur'}</th><th>${isMatchplay ? 'Joueur' : 'Sexe'}</th><th>Depart</th><th class="lb-score">Index</th><th class="lb-score">Jeu</th><th></th></tr></thead>
         <tbody>${players.map((p, i) => `
           <tr>
             ${isMatchplay
-              ? `<td style="font-family:Georgia,serif;color:#1a4d2e;font-weight:700">${i + 1}</td><td><strong>${escapeHtml(p.name)}</strong> <span class="muted" style="font-size:11px">(${p.sex})</span></td>`
-              : `<td><strong>${escapeHtml(p.name)}</strong></td><td>${p.sex}</td>`}
+              ? `<td style="font-family:Georgia,serif;color:#1a4d2e;font-weight:700">${i + 1}</td><td><strong>${escapeHtml(p.name)}</strong> <span class="muted" style="font-size:11px">(${p.sex === 'M' ? 'H' : 'F'})</span></td>`
+              : `<td><strong>${escapeHtml(p.name)}</strong></td><td>${p.sex === 'M' ? 'H' : 'F'}</td>`}
+            <td><span class="muted" style="font-size:12px">${teeLbl(p)}</span></td>
             <td class="lb-score">${p.handicap}</td>
             <td class="lb-score"><strong>${p.playingHcp}</strong></td>
             <td style="text-align:right;white-space:nowrap">
@@ -251,9 +272,33 @@
       }));
     }
 
+    const TEE_LABELS = { noir: 'Noir', blanc: 'Blanc', jaune: 'Jaune', bleu: 'Bleu', rouge: 'Rouge', violet: 'Violet', orange: 'Orange', pp: 'Pitch & Putt' };
+    const DEFAULT_TEE = { M: 'jaune', F: 'rouge' };
+
+    function refreshTeeSelect() {
+      const sex = document.getElementById('p-sex').value;
+      const sel = document.getElementById('p-tee');
+      const course = courses.find(c => c.id === selectedCourseId);
+      const tees = (course && course.tees ? course.tees : []).filter(t => t.sex === sex);
+      // Couleurs uniques (un parcours peut avoir plusieurs entrees pour le meme tee si bug seed)
+      const seen = new Set();
+      const opts = tees.filter(t => { if (seen.has(t.color)) return false; seen.add(t.color); return true; });
+      const previous = sel.value;
+      sel.innerHTML = opts.length
+        ? opts.map(t => `<option value="${t.color}">${TEE_LABELS[t.color] || t.color}</option>`).join('')
+        : '<option value="">(aucun depart configure)</option>';
+      // Restore selection si possible, sinon defaut selon sexe
+      const desired = (opts.find(t => t.color === previous) ? previous : DEFAULT_TEE[sex]);
+      const found = opts.find(t => t.color === desired);
+      sel.value = found ? found.color : (opts[0] ? opts[0].color : '');
+    }
+
+    document.getElementById('p-sex').addEventListener('change', refreshTeeSelect);
+
     document.getElementById('add-btn').addEventListener('click', async () => {
       const name = document.getElementById('p-name').value.trim();
       const sex = document.getElementById('p-sex').value;
+      const tee_color = document.getElementById('p-tee').value || null;
       const handicap = document.getElementById('p-hcp').value;
       const err = document.getElementById('add-error');
       err.classList.remove('show'); err.textContent = '';
@@ -261,7 +306,7 @@
       if (handicap === '') { showError(err, 'Index requis'); return; }
       const res = await fetch(`/api/games/${gameId}/players`, {
         method: 'POST', headers: {'Content-Type': 'application/json', ...authHeaders()},
-        body: JSON.stringify({ name, sex, handicap: Number(handicap) })
+        body: JSON.stringify({ name, sex, handicap: Number(handicap), tee_color })
       });
       if (!res.ok) { showError(err, (await res.json()).error || 'Erreur'); return; }
       document.getElementById('p-name').value = '';

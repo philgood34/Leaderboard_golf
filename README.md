@@ -116,6 +116,8 @@ Repartition des coups recus :
 - `base = floor(HCP_jeu / 18)` coups sur chaque trou
 - `extras = HCP_jeu mod 18` coup supplementaire sur les trous dont SI <= extras
 
+> **Note importante : index ≠ HCP de jeu.** Sur un parcours difficile (slope eleve, SSS > par), le HCP de jeu peut depasser l'index. Exemple concret : un joueur index 54 sur Massane (slope 135, SSS 74.7, par 72) recoit `round(54*135/113 + 2.7) = 67` coups. Distribution : 4 coups sur les trous SI 1-13, 3 coups sur les trous SI 14-18. Voir un badge `+4` sur la scorecard est donc normal et conforme a la regle officielle FFGolf, meme pour un index plafonne a 54.
+
 ## Formules
 
 - **Stroke Play Brut** : somme des coups bruts. Le plus bas gagne.
