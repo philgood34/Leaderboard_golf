@@ -12,10 +12,13 @@ const FORMULAS = {
 const FORMULA_LABELS = {
   stroke_brut: 'Stroke Play Brut',
   stroke_net:  'Stroke Play Net',
-  match_brut:  'Matchplay Brut (skins)',
-  match_net:   'Matchplay Net (skins)',
+  match_brut:  'Matchplay Brut',
+  match_net:   'Matchplay Net',
   chicago:     'Chicago'
 };
+
+// Liste des formules matchplay (utilises par le serveur pour valider le nombre pair de joueurs)
+const MATCHPLAY_FORMULAS = ['match_brut', 'match_net'];
 
 // HCP de jeu (course handicap) = round(index * slope/113 + (SSS - par))
 function playingHandicap(hcpIndex, slope, sss, parTotal) {
@@ -91,9 +94,9 @@ function computeLeaderboard(course, formula, players, scoresByPlayer) {
     case FORMULAS.STROKE_NET:
       return rankStroke(enriched, 'net', course.par_total);
     case FORMULAS.MATCH_BRUT:
-      return rankMatchplay(enriched, course.holes, false);
+      return rankMatchplayStandard(enriched, course.holes, false);
     case FORMULAS.MATCH_NET:
-      return rankMatchplay(enriched, course.holes, true);
+      return rankMatchplayStandard(enriched, course.holes, true);
     case FORMULAS.CHICAGO:
       return rankChicago(enriched, course.holes);
     default:
@@ -126,34 +129,146 @@ function rankStroke(enriched, mode, parTotal) {
   return assignRanks(rows);
 }
 
-function rankMatchplay(enriched, holes, useNet) {
-  // Skins : meilleur score (strict) sur le trou = 1 trou gagne.
-  const wins = Object.fromEntries(enriched.map(p => [p.id, 0]));
-  for (const h of holes) {
-    const entries = enriched
-      .map(p => {
-        const ph = p.perHole.find(x => x.num === h.num);
-        if (!ph || ph.strokes == null) return null;
-        return { id: p.id, score: useNet ? ph.net : ph.strokes };
-      })
-      .filter(Boolean);
-    if (entries.length < 2) continue;
-    const min = Math.min(...entries.map(e => e.score));
-    const winners = entries.filter(e => e.score === min);
-    if (winners.length === 1) wins[winners[0].id] += 1;
+// Matchplay standard : les joueurs sont apparies 2 par 2 selon leur ordre.
+// Chaque paire est un match independant ; on suit le differentiel "X up / X down" trou par trou.
+// Si |diff| > trous restants, le match est cloture (X&Y).
+function rankMatchplayStandard(enriched, holes, useNet) {
+  const totalHoles = holes.length;
+  const pairs = [];
+  for (let i = 0; i + 1 < enriched.length; i += 2) {
+    pairs.push([enriched[i], enriched[i + 1]]);
   }
-  const rows = enriched.map(p => ({
-    playerId: p.id,
-    name: p.name,
-    handicap: p.handicap,
-    playingHcp: p.playingHcp,
-    holesPlayed: p.holesPlayed,
-    score: wins[p.id],
-    scoreLabel: `${wins[p.id]} trou${wins[p.id] > 1 ? 's' : ''}`,
-    vsPar: null,
-    vsParLabel: '',
-    sortKey: -wins[p.id]
-  }));
+
+  const rows = [];
+
+  pairs.forEach((pair, idx) => {
+    const matchNum = idx + 1;
+    const [p1, p2] = pair;
+
+    let diff = 0; // > 0 : p1 mene
+    let holesPlayedTogether = 0;
+    let closedDiff = null;
+    let closedRemaining = null;
+
+    for (const h of holes) {
+      const ph1 = p1.perHole.find(x => x.num === h.num);
+      const ph2 = p2.perHole.find(x => x.num === h.num);
+      if (!ph1 || !ph2 || ph1.strokes == null || ph2.strokes == null) continue;
+
+      const s1 = useNet ? ph1.net : ph1.strokes;
+      const s2 = useNet ? ph2.net : ph2.strokes;
+      if (s1 < s2) diff += 1;
+      else if (s2 < s1) diff -= 1;
+
+      holesPlayedTogether += 1;
+
+      if (closedDiff === null) {
+        const remaining = totalHoles - holesPlayedTogether;
+        if (Math.abs(diff) > remaining) {
+          closedDiff = diff;
+          closedRemaining = remaining;
+        }
+      }
+    }
+
+    let status, labelP1, labelP2, leaderId;
+
+    if (closedDiff !== null) {
+      status = 'closed';
+      const absD = Math.abs(closedDiff);
+      const tag = closedRemaining === 0 ? `${absD} up` : `${absD}&${closedRemaining}`;
+      if (closedDiff > 0) {
+        labelP1 = `Gagne ${tag}`;
+        labelP2 = `Perd ${tag}`;
+        leaderId = p1.id;
+      } else {
+        labelP1 = `Perd ${tag}`;
+        labelP2 = `Gagne ${tag}`;
+        leaderId = p2.id;
+      }
+    } else if (holesPlayedTogether === totalHoles) {
+      if (diff === 0) {
+        status = 'final_AS';
+        labelP1 = labelP2 = 'AS';
+        leaderId = null;
+      } else {
+        status = 'final';
+        const absD = Math.abs(diff);
+        if (diff > 0) {
+          labelP1 = `Gagne ${absD} up`;
+          labelP2 = `Perd ${absD}`;
+          leaderId = p1.id;
+        } else {
+          labelP1 = `Perd ${absD}`;
+          labelP2 = `Gagne ${absD} up`;
+          leaderId = p2.id;
+        }
+      }
+    } else {
+      status = 'ongoing';
+      if (diff === 0) {
+        labelP1 = labelP2 = 'AS';
+        leaderId = null;
+      } else {
+        const absD = Math.abs(diff);
+        if (diff > 0) {
+          labelP1 = `${absD} UP`;
+          labelP2 = `${absD} DOWN`;
+          leaderId = p1.id;
+        } else {
+          labelP1 = `${absD} DOWN`;
+          labelP2 = `${absD} UP`;
+          leaderId = p2.id;
+        }
+      }
+    }
+
+    [p1, p2].forEach((p, posInPair) => {
+      const personalDiff = posInPair === 0 ? diff : -diff;
+      const opponent = posInPair === 0 ? p2 : p1;
+      rows.push({
+        playerId: p.id,
+        name: p.name,
+        handicap: p.handicap,
+        playingHcp: p.playingHcp,
+        holesPlayed: p.holesPlayed,
+        score: personalDiff,
+        scoreLabel: posInPair === 0 ? labelP1 : labelP2,
+        vsPar: null,
+        vsParLabel: '',
+        matchNum,
+        matchStatus: status,
+        isLeader: leaderId === p.id,
+        opponentId: opponent.id,
+        opponentName: opponent.name,
+        sortKey: matchNum * 1000 - personalDiff
+      });
+    });
+  });
+
+  // Joueur orphelin (nombre impair) — ne devrait pas arriver avec la validation cote serveur
+  const pairedIds = new Set(rows.map(r => r.playerId));
+  for (const p of enriched) {
+    if (pairedIds.has(p.id)) continue;
+    rows.push({
+      playerId: p.id,
+      name: p.name,
+      handicap: p.handicap,
+      playingHcp: p.playingHcp,
+      holesPlayed: p.holesPlayed,
+      score: 0,
+      scoreLabel: 'Sans adversaire',
+      vsPar: null,
+      vsParLabel: '',
+      matchNum: 999,
+      matchStatus: 'no_pair',
+      isLeader: false,
+      opponentId: null,
+      opponentName: null,
+      sortKey: 999000
+    });
+  }
+
   rows.sort((a, b) => a.sortKey - b.sortKey);
   return assignRanks(rows);
 }
@@ -200,6 +315,7 @@ function assignRanks(rows) {
 module.exports = {
   FORMULAS,
   FORMULA_LABELS,
+  MATCHPLAY_FORMULAS,
   playingHandicap,
   strokesOnHole,
   computeLeaderboard

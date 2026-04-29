@@ -82,6 +82,7 @@
   <script>
     let gameId = null;
     let gameCode = null;
+    let gameFormula = null;
     let courses = [];
     let selectedCourseId = null;
 
@@ -183,6 +184,7 @@
     });
 
     function showPlayersStep(data) {
+      gameFormula = data.game && data.game.formula;
       document.getElementById('step-players').style.display = 'block';
       renderPlayers(data.players || []);
       const sock = io();
@@ -196,19 +198,56 @@
         div.innerHTML = '<p class="muted" style="text-align:center;padding:14px 0">Aucun joueur dans le flight.</p>';
         return;
       }
-      div.innerHTML = `<table>
-        <thead><tr><th>Joueur</th><th>Sexe</th><th class="lb-score">Index</th><th class="lb-score">Jeu</th><th></th></tr></thead>
-        <tbody>${players.map(p => `
+
+      const isMatchplay = gameFormula && gameFormula.startsWith('match_');
+
+      let html = `<table>
+        <thead><tr><th>${isMatchplay ? '#' : 'Joueur'}</th><th>${isMatchplay ? 'Joueur' : 'Sexe'}</th><th class="lb-score">Index</th><th class="lb-score">Jeu</th><th></th></tr></thead>
+        <tbody>${players.map((p, i) => `
           <tr>
-            <td><strong>${escapeHtml(p.name)}</strong></td>
-            <td>${p.sex}</td>
+            ${isMatchplay
+              ? `<td style="font-family:Georgia,serif;color:#1a4d2e;font-weight:700">${i + 1}</td><td><strong>${escapeHtml(p.name)}</strong> <span class="muted" style="font-size:11px">(${p.sex})</span></td>`
+              : `<td><strong>${escapeHtml(p.name)}</strong></td><td>${p.sex}</td>`}
             <td class="lb-score">${p.handicap}</td>
             <td class="lb-score"><strong>${p.playingHcp}</strong></td>
-            <td><button class="small danger" data-del="${p.id}">Retirer</button></td>
+            <td style="text-align:right;white-space:nowrap">
+              ${i > 0 ? `<button class="small secondary move-btn" data-move="up" data-pid="${p.id}" title="Monter" aria-label="Monter">↑</button>` : '<span style="display:inline-block;width:30px"></span>'}
+              ${i < players.length - 1 ? `<button class="small secondary move-btn" data-move="down" data-pid="${p.id}" title="Descendre" aria-label="Descendre">↓</button>` : '<span style="display:inline-block;width:30px"></span>'}
+              <button class="small danger" data-del="${p.id}" title="Retirer" aria-label="Retirer">×</button>
+            </td>
           </tr>
         `).join('')}</tbody></table>`;
+
+      if (isMatchplay) {
+        if (players.length < 2) {
+          html += `<div class="muted" style="margin-top:10px;font-size:13px;text-align:center">Ajoute au moins 2 joueurs pour voir les matchs.</div>`;
+        } else if (players.length % 2 !== 0) {
+          html += `<div class="error show" style="margin-top:10px">⚠️ Nombre impair de joueurs. Ajoute ou retire un joueur (matchplay = paires).</div>`;
+        } else {
+          const pairs = [];
+          for (let i = 0; i + 1 < players.length; i += 2) pairs.push([players[i], players[i + 1]]);
+          html += `<div style="margin-top:14px;padding:12px;background:#faf6e9;border-radius:6px;border-left:3px solid #c9a961">
+            <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:#1a4d2e;font-weight:700;margin-bottom:8px">Tableau des matchs</div>
+            ${pairs.map((pr, i) => `<div style="font-size:14px;margin:4px 0;color:#1a2419">
+              <strong style="color:#1a4d2e">Match ${i + 1}</strong> &nbsp;${escapeHtml(pr[0].name)} <span class="muted">vs</span> ${escapeHtml(pr[1].name)}
+            </div>`).join('')}
+            <div class="muted" style="font-size:11px;margin-top:8px">💡 Utilise les flèches ↑ ↓ pour réorganiser les paires.</div>
+          </div>`;
+        }
+      }
+
+      div.innerHTML = html;
+
       div.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
         await fetch(`/api/games/${gameId}/players/${b.dataset.del}`, { method: 'DELETE', headers: authHeaders() });
+      }));
+
+      div.querySelectorAll('[data-move]').forEach(b => b.addEventListener('click', async () => {
+        await fetch(`/api/games/${gameId}/players/${b.dataset.pid}/move`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ direction: b.dataset.move })
+        });
       }));
     }
 

@@ -54,6 +54,12 @@ if (!cols.includes('code'))       db.exec("ALTER TABLE games ADD COLUMN code TEX
 if (!cols.includes('loop_twice')) db.exec("ALTER TABLE games ADD COLUMN loop_twice INTEGER NOT NULL DEFAULT 0");
 if (!cols.includes('closed_at'))  db.exec("ALTER TABLE games ADD COLUMN closed_at TEXT");
 
+const playerCols = db.prepare("PRAGMA table_info(players)").all().map(c => c.name);
+if (!playerCols.includes('position')) {
+  db.exec("ALTER TABLE players ADD COLUMN position INTEGER NOT NULL DEFAULT 0");
+  db.exec("UPDATE players SET position = id WHERE position = 0");
+}
+
 db.exec(`CREATE INDEX IF NOT EXISTS idx_games_status ON games(status)`);
 
 module.exports = db;

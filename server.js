@@ -7,7 +7,7 @@ const { Server } = require('socket.io');
 
 const db = require('./db');
 const { seed } = require('./seed-courses');
-const { computeLeaderboard, playingHandicap, FORMULA_LABELS } = require('./scoring');
+const { computeLeaderboard, playingHandicap, FORMULA_LABELS, MATCHPLAY_FORMULAS } = require('./scoring');
 
 // Seed parcours au demarrage si table vide
 const courseCount = db.prepare('SELECT COUNT(*) AS n FROM courses').get().n;
@@ -51,7 +51,7 @@ function getGameFull(gameId) {
   if (!game) return null;
   const baseCourse = getCourseRow(game.course_id);
   const course = getEffectiveCourse(baseCourse, game.loop_twice);
-  const players = db.prepare('SELECT * FROM players WHERE game_id = ? ORDER BY id').all(gameId);
+  const players = db.prepare('SELECT * FROM players WHERE game_id = ? ORDER BY position, id').all(gameId);
   const allScores = db.prepare(`
     SELECT s.* FROM scores s
     JOIN players p ON p.id = s.player_id
@@ -211,11 +211,38 @@ app.post('/api/games/:id/players', requireGameAuth, (req, res) => {
   const hcp = Number(handicap);
   if (Number.isNaN(hcp)) return res.status(400).json({ error: 'handicap invalide' });
 
-  const r = db.prepare(`INSERT INTO players (game_id, name, sex, handicap) VALUES (?, ?, ?, ?)`)
-    .run(gameId, name.trim(), sex, hcp);
+  const maxPos = db.prepare('SELECT COALESCE(MAX(position), 0) AS m FROM players WHERE game_id = ?').get(gameId).m;
+  const r = db.prepare(`INSERT INTO players (game_id, name, sex, handicap, position) VALUES (?, ?, ?, ?, ?)`)
+    .run(gameId, name.trim(), sex, hcp, maxPos + 1);
 
   broadcastGame(gameId);
   res.json({ id: r.lastInsertRowid });
+});
+
+// Reordonne un joueur dans la liste : direction = 'up' ou 'down'
+app.post('/api/games/:id/players/:pid/move', requireGameAuth, (req, res) => {
+  const gameId = Number(req.params.id);
+  const pid = Number(req.params.pid);
+  const direction = req.body && req.body.direction;
+  if (!['up', 'down'].includes(direction)) return res.status(400).json({ error: 'direction doit etre up ou down' });
+
+  const players = db.prepare('SELECT id, position FROM players WHERE game_id = ? ORDER BY position, id').all(gameId);
+  const idx = players.findIndex(p => p.id === pid);
+  if (idx === -1) return res.status(404).json({ error: 'Joueur introuvable' });
+  const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+  if (swapIdx < 0 || swapIdx >= players.length) return res.json({ ok: true }); // deja aux extremites
+
+  // Echange des positions (les positions reelles peuvent etre quelconques, on les normalise)
+  const a = players[idx];
+  const b = players[swapIdx];
+  const tx = db.transaction(() => {
+    db.prepare('UPDATE players SET position = ? WHERE id = ?').run(b.position, a.id);
+    db.prepare('UPDATE players SET position = ? WHERE id = ?').run(a.position, b.id);
+  });
+  tx();
+
+  broadcastGame(gameId);
+  res.json({ ok: true });
 });
 
 app.delete('/api/games/:id/players/:pid', requireGameAuth, (req, res) => {
@@ -228,8 +255,13 @@ app.delete('/api/games/:id/players/:pid', requireGameAuth, (req, res) => {
 
 app.post('/api/games/:id/start', requireGameAuth, (req, res) => {
   const gameId = Number(req.params.id);
+  const game = db.prepare('SELECT * FROM games WHERE id = ?').get(gameId);
   const players = db.prepare('SELECT COUNT(*) AS n FROM players WHERE game_id = ?').get(gameId).n;
   if (players < 1) return res.status(400).json({ error: 'Au moins 1 joueur requis' });
+  if (MATCHPLAY_FORMULAS.includes(game.formula)) {
+    if (players < 2) return res.status(400).json({ error: 'Matchplay : 2 joueurs minimum' });
+    if (players % 2 !== 0) return res.status(400).json({ error: 'Matchplay : nombre pair de joueurs requis (2, 4, 6...)' });
+  }
   db.prepare(`UPDATE games SET status = 'active' WHERE id = ?`).run(gameId);
   broadcastGame(gameId);
   res.json(getGameFull(gameId));

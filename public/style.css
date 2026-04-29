@@ -263,6 +263,106 @@ tr.rank-1 td:first-child + td {
   color: var(--gold);
 }
 
+.trophy-mini {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+  color: var(--gold);
+  margin-right: 2px;
+}
+
+/* === Match-play standard (style Ryder Cup) === */
+
+.match-card {
+  background: var(--paper);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  border-left: 4px solid var(--green-rough);
+  box-shadow: var(--shadow);
+  animation: card-fade-in 0.3s ease-out;
+}
+.match-card.won      { border-left-color: var(--gold); }
+.match-card.as-final { border-left-color: var(--text-muted); }
+.match-card.ongoing  { border-left-color: var(--green-fairway); }
+.match-card.no-pair  { border-left-color: #d68a3c; }
+
+.match-card .match-num {
+  font-family: Georgia, serif;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--green-deep);
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.match-card .match-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 15px;
+  border-bottom: 1px dashed var(--sand);
+}
+.match-card .match-row:last-of-type { border-bottom: none; }
+
+.match-card .match-row.leader {
+  background: linear-gradient(90deg, transparent 0%, rgba(201,169,97,0.18) 100%);
+  margin: 2px -8px;
+  padding: 8px;
+  border-radius: 6px;
+  border-bottom: none;
+}
+
+.match-card .match-row.me .player-name {
+  font-weight: 800;
+  color: var(--green-deep);
+}
+
+.match-card .player-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 8px;
+}
+.match-card .match-score {
+  font-family: Georgia, serif;
+  font-weight: 700;
+  font-size: 16px;
+  white-space: nowrap;
+  color: var(--green-deep);
+  letter-spacing: 0.5px;
+}
+.match-card.won .match-row.leader .match-score { color: var(--gold); }
+.match-card.as-final .match-score { color: var(--text-muted); font-style: italic; }
+
+.match-card .match-progress {
+  margin-top: 8px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  text-align: right;
+}
+
+.final-modal .final-matches {
+  margin: 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Boutons monter/descendre dans setup */
+.move-btn {
+  padding: 4px 10px !important;
+  font-size: 16px !important;
+  font-weight: 700;
+  min-width: 30px;
+  margin-right: 2px;
+}
+
 /* === Scorecard === */
 
 .scorecard-grid {
@@ -287,6 +387,7 @@ tr.rank-1 td:first-child + td {
   color: var(--gold);
 }
 .scorecard-grid .s {
+  position: relative;
   border: 1.5px solid var(--sand);
   border-radius: 0 0 8px 8px;
   border-top: none;
@@ -300,6 +401,18 @@ tr.rank-1 td:first-child + td {
   transition: transform 0.05s, box-shadow 0.1s;
   font-variant-numeric: tabular-nums;
 }
+.scorecard-grid .s .recv-badge {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--gold);
+  letter-spacing: 0.5px;
+  line-height: 1;
+  pointer-events: none;
+}
+.scorecard-grid .s .recv-badge.gives { color: var(--water); }
 .scorecard-grid .s:hover { box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
 .scorecard-grid .s.empty { color: var(--sand); font-weight: 400; }
 .scorecard-grid .s.eagle  { background: #fef3a3; color: #7a5c00; }
@@ -670,4 +783,7 @@ a.button-link.gold {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+  .match-card { box-shadow: none; border: 1px solid #ccc; page-break-inside: avoid; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .match-card .match-row.leader { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .recv-badge { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }

@@ -253,11 +253,21 @@
       }
     }
 
+    function isMatchplay() {
+      return state && state.game && (state.game.formula === 'match_brut' || state.game.formula === 'match_net');
+    }
+
     function renderLeaderboard() {
       const lb = state.leaderboard;
       const div = document.getElementById('leaderboard');
-      const hcount = holesCount();
       if (!lb.length) { div.innerHTML = '<p class="muted">Pas encore de joueurs.</p>'; return; }
+
+      if (isMatchplay()) {
+        renderMatchplayLeaderboard(div, lb);
+        return;
+      }
+
+      const hcount = holesCount();
       const showVsPar = state.game.formula.startsWith('stroke');
       div.innerHTML = `<table><thead><tr>
         <th class="lb-rank">#</th>
@@ -283,6 +293,45 @@
       }).join('') + '</tbody></table>';
     }
 
+    function renderMatchplayLeaderboard(div, lb) {
+      const matches = {};
+      for (const r of lb) {
+        if (!matches[r.matchNum]) matches[r.matchNum] = [];
+        matches[r.matchNum].push(r);
+      }
+      const matchKeys = Object.keys(matches).sort((a, b) => Number(a) - Number(b));
+      const hcount = holesCount();
+
+      div.innerHTML = matchKeys.map(k => {
+        const rows = matches[k];
+        if (k === '999') {
+          return rows.map(r => `<div class="match-card no-pair">
+            <div class="match-num">Sans adversaire</div>
+            <div class="match-row"><span class="player-name">${escapeHtml(r.name)}</span><span class="match-score muted">${escapeHtml(r.scoreLabel)}</span></div>
+          </div>`).join('');
+        }
+
+        const status = rows[0].matchStatus;
+        const statusCls = (status === 'closed' || status === 'final') ? 'won'
+                        : status === 'final_AS' ? 'as-final'
+                        : 'ongoing';
+        const totalHolesPlayed = Math.max(...rows.map(r => r.holesPlayed || 0));
+
+        return `<div class="match-card ${statusCls}">
+          <div class="match-num">Match ${k}${(status === 'closed' || status === 'final' || status === 'final_AS') ? ' · TERMINÉ' : ''}</div>
+          ${rows.map(r => {
+            const meCls = r.playerId === me ? ' me' : '';
+            const leaderCls = r.isLeader ? ' leader' : '';
+            return `<div class="match-row${meCls}${leaderCls}">
+              <span class="player-name">${r.isLeader ? '<svg class="trophy-mini" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v3a5 5 0 0010 0V4H7zm-3 1v2a3 3 0 003 3v-1a2 2 0 01-2-2V5H4zm14 0v2a2 2 0 01-2 2v1a3 3 0 003-3V5h-1zM10 14h4v2H10v-2zm-2 4h8v2H8v-2z"/></svg> ' : ''}${escapeHtml(r.name)} <span class="muted" style="font-size:12px">(${r.handicap}/${r.playingHcp})</span></span>
+              <span class="match-score">${escapeHtml(r.scoreLabel)}</span>
+            </div>`;
+          }).join('')}
+          <div class="match-progress muted">${totalHolesPlayed}/${hcount} trous joués</div>
+        </div>`;
+      }).join('');
+    }
+
     function renderScorecard() {
       const player = state.players.find(p => p.id === selectedPlayerId);
       if (!player) return;
@@ -304,8 +353,16 @@
           }
           const active = h.num === selectedHole ? ' active' : '';
           const popCls = lastSetCell === `${selectedPlayerId}:${h.num}` ? ' pop' : '';
+          const recv = strokesOnHole(player.playingHcp, h.si);
+          let recvBadge = '';
+          if (recv > 0) {
+            const dots = '•'.repeat(Math.min(recv, 3));
+            recvBadge = `<span class="recv-badge" title="Coup${recv > 1 ? 's' : ''} reçu${recv > 1 ? 's' : ''} : ${recv}">${dots}</span>`;
+          } else if (recv < 0) {
+            recvBadge = `<span class="recv-badge gives" title="Coup donné">−</span>`;
+          }
           headers.push(`<div class="h">${h.num}<span class="par">P${h.par}</span></div>`);
-          scores.push(`<div class="s ${cls}${active}${popCls}" data-hole="${h.num}">${s != null ? s : '-'}</div>`);
+          scores.push(`<div class="s ${cls}${active}${popCls}" data-hole="${h.num}">${s != null ? s : '-'}${recvBadge}</div>`);
         }
         return headers.join('') + scores.join('');
       }
@@ -423,10 +480,31 @@
       const printUrl = `/scorecard.html?game=${state.game.id}&code=${encodeURIComponent(gameCode)}`;
       const overlay = document.createElement('div');
       overlay.className = 'modal-overlay';
-      overlay.innerHTML = `<div class="modal-box final-modal">
-        <h2>Partie terminee !</h2>
-        <p class="subtitle">${escapeHtml(state.course.name)} &middot; ${escapeHtml(state.formulaLabel)}</p>
-        <table>
+
+      let resultsHtml;
+      if (isMatchplay()) {
+        const matches = {};
+        for (const r of lb) {
+          if (!matches[r.matchNum]) matches[r.matchNum] = [];
+          matches[r.matchNum].push(r);
+        }
+        const matchKeys = Object.keys(matches).sort((a, b) => Number(a) - Number(b));
+        resultsHtml = `<div class="final-matches">${matchKeys.map(k => {
+          if (k === '999') return '';
+          const rows = matches[k];
+          const status = rows[0].matchStatus;
+          const cls = (status === 'closed' || status === 'final') ? 'won'
+                    : status === 'final_AS' ? 'as-final' : 'ongoing';
+          return `<div class="match-card ${cls}">
+            <div class="match-num">Match ${k}</div>
+            ${rows.map(r => `<div class="match-row${r.isLeader ? ' leader' : ''}">
+              <span class="player-name">${r.isLeader ? '<svg class="trophy-mini" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v3a5 5 0 0010 0V4H7zm-3 1v2a3 3 0 003 3v-1a2 2 0 01-2-2V5H4zm14 0v2a2 2 0 01-2 2v1a3 3 0 003-3V5h-1zM10 14h4v2H10v-2zm-2 4h8v2H8v-2z"/></svg> ' : ''}${escapeHtml(r.name)}</span>
+              <span class="match-score">${escapeHtml(r.scoreLabel)}</span>
+            </div>`).join('')}
+          </div>`;
+        }).join('')}</div>`;
+      } else {
+        resultsHtml = `<table>
           <thead><tr><th class="lb-rank">#</th><th>Joueur</th><th class="lb-score">Score</th>${showVsPar ? '<th class="lb-score">Vs Par</th>' : ''}</tr></thead>
           <tbody>${lb.map(r => `
             <tr class="${r.rank === 1 ? 'rank-1' : ''}">
@@ -435,7 +513,13 @@
               <td class="lb-score">${escapeHtml(r.scoreLabel)}</td>
               ${showVsPar ? `<td class="lb-score lb-vp ${r.vsPar < 0 ? 'under' : r.vsPar > 0 ? 'over' : 'even'}">${r.vsParLabel}</td>` : ''}
             </tr>`).join('')}</tbody>
-        </table>
+        </table>`;
+      }
+
+      overlay.innerHTML = `<div class="modal-box final-modal">
+        <h2>Partie terminee !</h2>
+        <p class="subtitle">${escapeHtml(state.course.name)} &middot; ${escapeHtml(state.formulaLabel)}</p>
+        ${resultsHtml}
         <div class="actions">
           <a class="button-link" href="${csvUrl}" download>Telecharger CSV</a>
           <a class="button-link" href="${printUrl}" target="_blank" rel="noopener">Carte imprimable</a>

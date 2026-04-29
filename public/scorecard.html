@@ -12,6 +12,7 @@
     .sc-hole-row .lbl { font-weight: 600; background: #1a4d2e; color: #faf6e9; }
     .sc-hole-row .par-row { background: #c9a961; color: #1a2419; font-weight: 700; }
     .sc-hole-row .si-row  { background: #faf6e9; color: #6b7768; font-size: 11px; }
+    .sc-hole-row .recv-row { background: #fff8e1; color: #c9a961; font-weight: 700; font-size: 11px; letter-spacing: 1px; }
     .sc-hole-row .total   { background: #1a4d2e; color: #faf6e9; font-weight: 700; }
     .sc-block { margin-bottom: 14px; }
     .sc-block-title { font-family: Georgia, serif; font-weight: 700; color: #1a4d2e; margin: 8px 0 4px; font-size: 14px; }
@@ -66,6 +67,10 @@
       e.style.display = 'block'; e.textContent = msg;
     }
 
+    function isMatchplay(d) {
+      return d.game.formula === 'match_brut' || d.game.formula === 'match_net';
+    }
+
     function render(d) {
       document.getElementById('loading').style.display = 'none';
       document.getElementById('content').style.display = 'block';
@@ -74,6 +79,18 @@
       document.getElementById('subtitle').textContent =
         `${d.formulaLabel} - ${d.course.holes.length} trous - ${date}`;
 
+      if (isMatchplay(d)) {
+        renderMatchplayRanking(d);
+      } else {
+        renderStandardRanking(d);
+      }
+
+      // Cartes detaillees par joueur
+      const cards = document.getElementById('cards');
+      cards.innerHTML = d.players.map(p => buildPlayerCard(p, d)).join('');
+    }
+
+    function renderStandardRanking(d) {
       const showVsPar = d.game.formula.startsWith('stroke');
       document.getElementById('ranking').innerHTML = `<table><thead><tr>
         <th class="lb-rank">#</th><th>Joueur</th><th class="lb-score">Index</th><th class="lb-score">Jeu</th>
@@ -87,10 +104,42 @@
           <td class="lb-score">${escapeHtml(r.scoreLabel)}</td>
           ${showVsPar ? `<td class="lb-score lb-vp ${r.vsPar < 0 ? 'under' : r.vsPar > 0 ? 'over' : 'even'}">${r.vsParLabel}</td>` : ''}
         </tr>`).join('')}</tbody></table>`;
+    }
 
-      // Cartes detaillees par joueur
-      const cards = document.getElementById('cards');
-      cards.innerHTML = d.players.map(p => buildPlayerCard(p, d)).join('');
+    function renderMatchplayRanking(d) {
+      const matches = {};
+      for (const r of d.leaderboard) {
+        if (!matches[r.matchNum]) matches[r.matchNum] = [];
+        matches[r.matchNum].push(r);
+      }
+      const matchKeys = Object.keys(matches).sort((a, b) => Number(a) - Number(b));
+      document.getElementById('ranking').innerHTML = matchKeys.map(k => {
+        if (k === '999') return '';
+        const rows = matches[k];
+        const status = rows[0].matchStatus;
+        const cls = (status === 'closed' || status === 'final') ? 'won'
+                  : status === 'final_AS' ? 'as-final' : 'ongoing';
+        return `<div class="match-card ${cls}">
+          <div class="match-num">Match ${k}</div>
+          ${rows.map(r => `<div class="match-row${r.isLeader ? ' leader' : ''}">
+            <span class="player-name">${escapeHtml(r.name)} <span class="muted" style="font-size:11px">(${r.handicap}/${r.playingHcp})</span></span>
+            <span class="match-score">${escapeHtml(r.scoreLabel)}</span>
+          </div>`).join('')}
+        </div>`;
+      }).join('');
+    }
+
+    function strokesOnHole(playingHcp, si) {
+      if (playingHcp >= 0) {
+        const base = Math.floor(playingHcp / 18);
+        const extras = playingHcp % 18;
+        return base + (si <= extras ? 1 : 0);
+      } else {
+        const n = -playingHcp;
+        const base = Math.floor(n / 18);
+        const extras = n % 18;
+        return -(base + (si > 18 - extras ? 1 : 0));
+      }
     }
 
     function buildPlayerCard(p, d) {
@@ -105,12 +154,19 @@
         const labels = ['Trou', ...slice.map(h => h.num), 'Total'];
         const pars   = ['Par',  ...slice.map(h => h.par), slice.reduce((s, h) => s + h.par, 0)];
         const sis    = ['SI',   ...slice.map(h => h.si),  ''];
+        const recvs  = ['Reçus', ...slice.map(h => {
+          const r = strokesOnHole(p.playingHcp, h.si);
+          if (r === 0) return '';
+          if (r > 0) return '•'.repeat(Math.min(r, 3));
+          return '−';
+        }), slice.reduce((s, h) => s + Math.max(0, strokesOnHole(p.playingHcp, h.si)), 0) || ''];
         const scores = ['Score', ...slice.map(h => ps[h.num] != null ? ps[h.num] : '-'), slice.reduce((s, h) => s + (ps[h.num] || 0), 0) || '-'];
         const cell = (v, cls) => `<div class="${cls || ''}">${v}</div>`;
         return `
           <div class="sc-hole-row">${labels.map((v, i) => cell(v, i === 0 ? 'lbl' : i === labels.length - 1 ? 'total' : 'lbl')).join('')}</div>
           <div class="sc-hole-row">${pars.map((v, i) => cell(v, i === 0 ? 'par-row' : i === pars.length - 1 ? 'par-row' : 'par-row')).join('')}</div>
           <div class="sc-hole-row">${sis.map((v, i) => cell(v, 'si-row')).join('')}</div>
+          <div class="sc-hole-row">${recvs.map((v, i) => cell(v, i === 0 ? 'lbl' : 'recv-row')).join('')}</div>
           <div class="sc-hole-row">${scores.map((v, i) => cell(v, i === 0 ? 'lbl' : i === scores.length - 1 ? 'total' : '')).join('')}</div>
         `;
       }
