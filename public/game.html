@@ -7,6 +7,44 @@
   <meta name="theme-color" content="#1a4d2e">
   <title>Partie en cours - Leaderboard Golf</title>
   <link rel="stylesheet" href="/style.css">
+  <style>
+    .lb-header { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap }
+    .lb-header h2 { display:flex; align-items:center; gap:8px }
+    .lb-header button { width:auto; padding:6px 14px; font-size:13px; flex-shrink:0 }
+
+    /* Scroll automatique si beaucoup de joueurs (mode normal).
+       Limite hybride : min entre 50vh (petits ecrans) et 400px (grands ecrans). */
+    #lb-card > #leaderboard { max-height: min(50vh, 400px) !important; overflow-y: auto !important }
+
+    /* Mode plein ecran (affichage club-house) — base CSS uniquement, pas d'API browser */
+    body.lb-fullscreen { background:#faf6e9; padding:0; margin:0; overflow:hidden }
+    body.lb-fullscreen #auth-block,
+    body.lb-fullscreen #game-root > .game-header,
+    body.lb-fullscreen #game-root > .card:not(#lb-card),
+    body.lb-fullscreen > a {
+      display:none !important;
+    }
+    body.lb-fullscreen #game-root {
+      display:block !important; padding:0; margin:0; max-width:none; width:100vw;
+    }
+    body.lb-fullscreen #lb-card {
+      position:fixed; inset:0; margin:0; padding:20px 28px;
+      max-width:none; width:100vw; height:100vh; box-sizing:border-box;
+      border-radius:0; border-left:none; box-shadow:none;
+      display:flex; flex-direction:column;
+      overflow:hidden;
+      z-index:50;
+    }
+    body.lb-fullscreen #lb-card .lb-header { padding-bottom:14px; border-bottom:2px solid #c9a961 }
+    body.lb-fullscreen #lb-card .lb-header h2 { font-size:28px }
+    body.lb-fullscreen #lb-card > #leaderboard { flex:1; overflow-y:auto !important; margin-top:14px; max-height:none !important }
+    body.lb-fullscreen #lb-card #leaderboard table { font-size:18px; width:100% }
+    body.lb-fullscreen #lb-card #leaderboard table th { font-size:14px; padding:10px 12px }
+    body.lb-fullscreen #lb-card #leaderboard table td { padding:14px 12px }
+    body.lb-fullscreen #toggle-fullscreen,
+    body.lb-fullscreen #toggle-lb-stableford { display:none !important }
+    body.lb-fullscreen #exit-fullscreen { display:block !important; align-self:flex-start; padding:10px 18px; font-size:15px }
+  </style>
 </head>
 <body>
   <div id="auth-block" class="card cream" style="display:none">
@@ -32,15 +70,19 @@
       <button id="finish-btn" class="secondary small">Terminer</button>
     </div>
 
-    <div class="card">
-      <h2 style="margin-top:0">
-        <svg class="trophy" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M7 4v3a5 5 0 0010 0V4H7zm-3 1v2a3 3 0 003 3v-1a2 2 0 01-2-2V5H4zm14 0v2a2 2 0 01-2 2v1a3 3 0 003-3V5h-1zM10 14h4v2H10v-2zm-2 4h8v2H8v-2z"/>
-        </svg>
-        Leaderboard
-      </h2>
-      <button id="toggle-lb-stableford" class="secondary" style="margin-bottom:10px;width:100%;display:none">Score en stableford</button>
+    <div class="card" id="lb-card">
+      <div class="lb-header">
+        <h2 style="margin-top:0;margin-bottom:0">
+          <svg class="trophy" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M7 4v3a5 5 0 0010 0V4H7zm-3 1v2a3 3 0 003 3v-1a2 2 0 01-2-2V5H4zm14 0v2a2 2 0 01-2 2v1a3 3 0 003-3V5h-1zM10 14h4v2H10v-2zm-2 4h8v2H8v-2z"/>
+          </svg>
+          Leaderboard
+        </h2>
+        <button id="toggle-fullscreen" class="secondary" title="Mode plein ecran (club-house)">Plein écran</button>
+      </div>
+      <button id="toggle-lb-stableford" class="secondary" style="margin-top:10px;margin-bottom:10px;width:100%;display:none">Score en stableford</button>
       <div id="leaderboard"></div>
+      <button id="exit-fullscreen" class="secondary" style="display:none;margin-top:14px">← Retour saisie</button>
     </div>
 
     <div class="card">
@@ -85,6 +127,7 @@
       </div>
     </div>
 
+    <a href="/setup.html" class="button-link secondary">← Modifier le flight</a>
     <a href="/" class="button-link secondary">Retour au club-house</a>
   </div>
 
@@ -382,6 +425,18 @@
       lbViewStableford = !lbViewStableford;
       document.getElementById('toggle-lb-stableford').textContent = lbViewStableford ? 'Score brut / net' : 'Score en stableford';
       renderLeaderboard();
+    });
+
+    // Plein ecran 100% CSS : pas d'API browser fullscreen pour eviter les
+    // problemes de chrome cache / impossibilite de fermer l'onglet.
+    // L'utilisateur peut presser F11 manuellement pour un vrai fullscreen sur PC.
+    function enterFullscreen() { document.body.classList.add('lb-fullscreen'); }
+    function exitFullscreen()  { document.body.classList.remove('lb-fullscreen'); }
+    document.getElementById('toggle-fullscreen').addEventListener('click', enterFullscreen);
+    document.getElementById('exit-fullscreen').addEventListener('click', exitFullscreen);
+    // Esc pour sortir
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && document.body.classList.contains('lb-fullscreen')) exitFullscreen();
     });
 
     function renderMatchplayLeaderboard(div, lb) {

@@ -246,10 +246,17 @@ app.post('/api/games/:id/players', requireGameAuth, (req, res) => {
   if (!['M', 'F'].includes(sex)) return res.status(400).json({ error: 'sex doit etre M ou F' });
   const hcp = Number(handicap);
   if (Number.isNaN(hcp)) return res.status(400).json({ error: 'handicap invalide' });
+  const trimmed = name.trim();
+
+  // Unicite du nom dans ce flight (insensible a la casse / espaces).
+  const dup = db.prepare(
+    `SELECT id FROM players WHERE game_id = ? AND LOWER(TRIM(name)) = LOWER(TRIM(?))`
+  ).get(gameId, trimmed);
+  if (dup) return res.status(409).json({ error: `Nom deja utilise dans ce flight : ${trimmed}` });
 
   const maxPos = db.prepare('SELECT COALESCE(MAX(position), 0) AS m FROM players WHERE game_id = ?').get(gameId).m;
   const r = db.prepare(`INSERT INTO players (game_id, name, sex, handicap, position, tee_color) VALUES (?, ?, ?, ?, ?, ?)`)
-    .run(gameId, name.trim(), sex, hcp, maxPos + 1, tee_color || null);
+    .run(gameId, trimmed, sex, hcp, maxPos + 1, tee_color || null);
 
   broadcastGame(gameId);
   res.json({ id: r.lastInsertRowid });

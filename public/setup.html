@@ -87,6 +87,7 @@
     let gameFormula = null;
     let courses = [];
     let selectedCourseId = null;
+    let currentPlayers = []; // dernier etat des joueurs, utilise pour valider l'unicite du nom
 
     function authHeaders() { return gameCode ? { 'X-Game-Code': gameCode } : {}; }
 
@@ -154,7 +155,8 @@
       const reset = url.searchParams.get('reset') === '1';
       if (reset) return;
       const meta = await fetch('/api/games/active/exists').then(r => r.json());
-      if (meta.exists && meta.status === 'setup') {
+      // On autorise aussi les parties 'active' pour ajouter / retirer un joueur a chaud.
+      if (meta.exists && (meta.status === 'setup' || meta.status === 'active')) {
         const code = localStorage.getItem('game_code_' + meta.id);
         if (!code) return;
         const r = await fetch('/api/games/' + meta.id, { headers: { 'X-Game-Code': code } });
@@ -212,6 +214,7 @@
     }
 
     function renderPlayers(players) {
+      currentPlayers = players || [];
       const div = document.getElementById('players-list');
       if (!players.length) {
         div.innerHTML = '<p class="muted" style="text-align:center;padding:14px 0">Aucun joueur dans le flight.</p>';
@@ -295,6 +298,11 @@
 
     document.getElementById('p-sex').addEventListener('change', refreshTeeSelect);
 
+    function isNameTaken(name) {
+      const norm = name.trim().toLowerCase();
+      return currentPlayers.some(p => (p.name || '').trim().toLowerCase() === norm);
+    }
+
     document.getElementById('add-btn').addEventListener('click', async () => {
       const name = document.getElementById('p-name').value.trim();
       const sex = document.getElementById('p-sex').value;
@@ -303,6 +311,7 @@
       const err = document.getElementById('add-error');
       err.classList.remove('show'); err.textContent = '';
       if (!name) { showError(err, 'Nom requis'); return; }
+      if (isNameTaken(name)) { showError(err, `Nom deja utilise dans ce flight : ${name}`); return; }
       if (handicap === '') { showError(err, 'Index requis'); return; }
       const res = await fetch(`/api/games/${gameId}/players`, {
         method: 'POST', headers: {'Content-Type': 'application/json', ...authHeaders()},
