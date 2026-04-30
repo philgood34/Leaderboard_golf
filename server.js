@@ -77,6 +77,8 @@ function getGameFull(gameId) {
   const baseCourse = getCourseRow(game.course_id);
   const course = getEffectiveCourse(baseCourse, game.loop_twice);
   const players = db.prepare('SELECT * FROM players WHERE game_id = ? ORDER BY position, id').all(gameId);
+  const teams = db.prepare('SELECT * FROM teams WHERE game_id = ? ORDER BY position, id').all(gameId);
+  const teamsById = Object.fromEntries(teams.map(t => [t.id, t]));
   const allScores = db.prepare(`
     SELECT s.* FROM scores s
     JOIN players p ON p.id = s.player_id
@@ -90,13 +92,14 @@ function getGameFull(gameId) {
     scoresByPlayer[s.player_id][s.hole_num] = s.strokes;
   }
 
-  // Enrichit chaque joueur avec slope/sss du tee choisi (fallback course par defaut)
+  // Enrichit chaque joueur avec slope/sss du tee choisi + objet team complet
   const playersWithTee = players.map(p => {
     const tee = findTee(course, p.sex, p.tee_color);
     return {
       ...p,
       slope: tee ? tee.slope : course.slope,
-      sss:   tee ? tee.sss   : course.sss
+      sss:   tee ? tee.sss   : course.sss,
+      team:  p.team_id ? (teamsById[p.team_id] || null) : null
     };
   });
 
@@ -112,6 +115,7 @@ function getGameFull(gameId) {
     course,
     formulaLabel: FORMULA_LABELS[game.formula] || game.formula,
     players: playersEnriched,
+    teams,
     scores: scoresByPlayer,
     leaderboard
   };
@@ -241,7 +245,7 @@ app.get('/api/games/:id', requireGameAuth, (req, res) => {
 
 app.post('/api/games/:id/players', requireGameAuth, (req, res) => {
   const gameId = Number(req.params.id);
-  const { name, sex, handicap, tee_color } = req.body;
+  const { name, sex, handicap, tee_color, team_id } = req.body;
   if (!name || !sex || handicap == null) return res.status(400).json({ error: 'name, sex, handicap requis' });
   if (!['M', 'F'].includes(sex)) return res.status(400).json({ error: 'sex doit etre M ou F' });
   const hcp = Number(handicap);
@@ -254,12 +258,90 @@ app.post('/api/games/:id/players', requireGameAuth, (req, res) => {
   ).get(gameId, trimmed);
   if (dup) return res.status(409).json({ error: `Nom deja utilise dans ce flight : ${trimmed}` });
 
+  // Verifie que team_id (si fourni) appartient bien a cette partie
+  let teamIdValid = null;
+  if (team_id != null && team_id !== '') {
+    const t = db.prepare('SELECT id FROM teams WHERE id = ? AND game_id = ?').get(Number(team_id), gameId);
+    if (!t) return res.status(400).json({ error: 'Equipe inconnue pour cette partie' });
+    teamIdValid = t.id;
+  }
+
   const maxPos = db.prepare('SELECT COALESCE(MAX(position), 0) AS m FROM players WHERE game_id = ?').get(gameId).m;
-  const r = db.prepare(`INSERT INTO players (game_id, name, sex, handicap, position, tee_color) VALUES (?, ?, ?, ?, ?, ?)`)
-    .run(gameId, trimmed, sex, hcp, maxPos + 1, tee_color || null);
+  const r = db.prepare(`INSERT INTO players (game_id, name, sex, handicap, position, tee_color, team_id) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .run(gameId, trimmed, sex, hcp, maxPos + 1, tee_color || null, teamIdValid);
 
   broadcastGame(gameId);
   res.json({ id: r.lastInsertRowid });
+});
+
+// ---------- Routes equipes (formule match_team) ----------
+
+const VALID_TEAM_COLORS = ['rouge', 'bleu', 'vert', 'jaune'];
+
+app.post('/api/games/:id/teams', requireGameAuth, (req, res) => {
+  const gameId = Number(req.params.id);
+  const { name, color } = req.body;
+  if (!name || !color) return res.status(400).json({ error: 'name et color requis' });
+  if (!VALID_TEAM_COLORS.includes(color)) return res.status(400).json({ error: `Couleur invalide (rouge/bleu/vert/jaune)` });
+
+  const trimmed = name.trim();
+  const teamCount = db.prepare('SELECT COUNT(*) AS n FROM teams WHERE game_id = ?').get(gameId).n;
+  if (teamCount >= 4) return res.status(400).json({ error: 'Maximum 4 equipes' });
+
+  const dupName = db.prepare(`SELECT id FROM teams WHERE game_id = ? AND LOWER(TRIM(name)) = LOWER(TRIM(?))`).get(gameId, trimmed);
+  if (dupName) return res.status(409).json({ error: `Nom d'equipe deja utilise : ${trimmed}` });
+
+  const dupColor = db.prepare(`SELECT id FROM teams WHERE game_id = ? AND color = ?`).get(gameId, color);
+  if (dupColor) return res.status(409).json({ error: `Couleur deja utilisee : ${color}` });
+
+  const maxPos = db.prepare('SELECT COALESCE(MAX(position), 0) AS m FROM teams WHERE game_id = ?').get(gameId).m;
+  const r = db.prepare(`INSERT INTO teams (game_id, name, color, position) VALUES (?, ?, ?, ?)`)
+    .run(gameId, trimmed, color, maxPos + 1);
+
+  broadcastGame(gameId);
+  res.json({ id: r.lastInsertRowid });
+});
+
+app.delete('/api/games/:id/teams/:tid', requireGameAuth, (req, res) => {
+  const gameId = Number(req.params.id);
+  const tid = Number(req.params.tid);
+  // Desassigne les joueurs avant de supprimer l'equipe
+  db.prepare('UPDATE players SET team_id = NULL WHERE team_id = ? AND game_id = ?').run(tid, gameId);
+  db.prepare('DELETE FROM teams WHERE id = ? AND game_id = ?').run(tid, gameId);
+  broadcastGame(gameId);
+  res.json({ ok: true });
+});
+
+// Update team_id d'un joueur (pour l'assignation a une equipe sans recreer le joueur)
+app.patch('/api/games/:id/players/:pid', requireGameAuth, (req, res) => {
+  const gameId = Number(req.params.id);
+  const pid = Number(req.params.pid);
+  const { team_id } = req.body;
+  if (team_id !== null && team_id !== undefined && team_id !== '') {
+    const t = db.prepare('SELECT id FROM teams WHERE id = ? AND game_id = ?').get(Number(team_id), gameId);
+    if (!t) return res.status(400).json({ error: 'Equipe inconnue pour cette partie' });
+    db.prepare('UPDATE players SET team_id = ? WHERE id = ? AND game_id = ?').run(Number(team_id), pid, gameId);
+  } else {
+    db.prepare('UPDATE players SET team_id = NULL WHERE id = ? AND game_id = ?').run(pid, gameId);
+  }
+  broadcastGame(gameId);
+  res.json({ ok: true });
+});
+
+// Reordonne tous les joueurs d'un coup : body = { order: [pid1, pid2, ...] }
+app.post('/api/games/:id/players/reorder', requireGameAuth, (req, res) => {
+  const gameId = Number(req.params.id);
+  const { order } = req.body || {};
+  if (!Array.isArray(order)) return res.status(400).json({ error: 'order (array) requis' });
+  const tx = db.transaction(() => {
+    order.forEach((pid, i) => {
+      db.prepare('UPDATE players SET position = ? WHERE id = ? AND game_id = ?')
+        .run(i + 1, Number(pid), gameId);
+    });
+  });
+  tx();
+  broadcastGame(gameId);
+  res.json({ ok: true });
 });
 
 // Reordonne un joueur dans la liste : direction = 'up' ou 'down'
@@ -304,6 +386,25 @@ app.post('/api/games/:id/start', requireGameAuth, (req, res) => {
   if (MATCHPLAY_FORMULAS.includes(game.formula)) {
     if (players < 2) return res.status(400).json({ error: 'Matchplay : 2 joueurs minimum' });
     if (players % 2 !== 0) return res.status(400).json({ error: 'Matchplay : nombre pair de joueurs requis (2, 4, 6...)' });
+  }
+  // Validation specifique match_team : equipes definies + paires cross-team
+  if (game.formula === 'match_team') {
+    const teamRows = db.prepare('SELECT id FROM teams WHERE game_id = ?').all(gameId);
+    if (teamRows.length < 2) return res.status(400).json({ error: 'Match Play par equipes : 2 equipes minimum requises' });
+    if (teamRows.length > 4) return res.status(400).json({ error: 'Match Play par equipes : 4 equipes maximum' });
+
+    const playersList = db.prepare('SELECT id, name, team_id FROM players WHERE game_id = ? ORDER BY position, id').all(gameId);
+    const unassigned = playersList.filter(p => !p.team_id);
+    if (unassigned.length) {
+      return res.status(400).json({ error: `${unassigned.length} joueur(s) sans equipe : ${unassigned.map(p => p.name).join(', ')}` });
+    }
+    for (let i = 0; i + 1 < playersList.length; i += 2) {
+      if (playersList[i].team_id === playersList[i + 1].team_id) {
+        return res.status(400).json({
+          error: `Match ${(i / 2) + 1} : ${playersList[i].name} et ${playersList[i + 1].name} sont dans la meme equipe (interdit)`
+        });
+      }
+    }
   }
   db.prepare(`UPDATE games SET status = 'active' WHERE id = ?`).run(gameId);
   broadcastGame(gameId);

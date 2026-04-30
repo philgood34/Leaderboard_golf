@@ -62,11 +62,27 @@ if (!playerCols.includes('position')) {
 if (!playerCols.includes('tee_color')) {
   db.exec("ALTER TABLE players ADD COLUMN tee_color TEXT");
 }
+if (!playerCols.includes('team_id')) {
+  db.exec("ALTER TABLE players ADD COLUMN team_id INTEGER");
+}
 
 const courseCols = db.prepare("PRAGMA table_info(courses)").all().map(c => c.name);
 if (!courseCols.includes('tees_json')) {
   db.exec("ALTER TABLE courses ADD COLUMN tees_json TEXT");
 }
+
+// Table des equipes (formule match_team / Ryder Cup)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS teams (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY(game_id) REFERENCES games(id) ON DELETE CASCADE
+  );
+`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_teams_game ON teams(game_id)`);
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_games_status ON games(status)`);
 

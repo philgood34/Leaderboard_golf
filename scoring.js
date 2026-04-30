@@ -7,6 +7,7 @@ const FORMULAS = {
   STROKE_NET:  'stroke_net',  // legacy : conserve pour parties pre-fusion
   MATCH_BRUT:  'match_brut',
   MATCH_NET:   'match_net',
+  MATCH_TEAM:  'match_team',  // Ryder Cup : matchplay brut par equipes
   CHICAGO:     'chicago'
 };
 
@@ -16,11 +17,12 @@ const FORMULA_LABELS = {
   stroke_net:  'Stroke Play Net',
   match_brut:  'Matchplay Brut',
   match_net:   'Matchplay Net',
+  match_team:  'Match Play par equipes (Ryder)',
   chicago:     'Chicago'
 };
 
 // Liste des formules matchplay (utilises par le serveur pour valider le nombre pair de joueurs)
-const MATCHPLAY_FORMULAS = ['match_brut', 'match_net'];
+const MATCHPLAY_FORMULAS = ['match_brut', 'match_net', 'match_team'];
 
 // HCP de jeu (course handicap) = round(index * slope/113 + (SSS - par))
 function playingHandicap(hcpIndex, slope, sss, parTotal) {
@@ -88,6 +90,7 @@ function computeLeaderboard(course, formula, players, scoresByPlayer) {
     const grossTotal = perHole.reduce((s, h) => s + (h.strokes ?? 0), 0);
     const netTotal = perHole.reduce((s, h) => s + (h.net ?? 0), 0);
     return {
+      ...p, // garde tee_color, team_id, team (objet), etc.
       id: p.id,
       name: p.name,
       sex: p.sex,
@@ -111,6 +114,8 @@ function computeLeaderboard(course, formula, players, scoresByPlayer) {
       return rankMatchplayStandard(enriched, course.holes, false);
     case FORMULAS.MATCH_NET:
       return rankMatchplayStandard(enriched, course.holes, true);
+    case FORMULAS.MATCH_TEAM:
+      return rankMatchplayTeam(enriched, course.holes, players);
     case FORMULAS.CHICAGO:
       return rankChicago(enriched, course.holes);
     default:
@@ -323,6 +328,157 @@ function rankMatchplayStandard(enriched, holes, useNet) {
       isLeader: false,
       opponentId: null,
       opponentName: null,
+      sortKey: 999000
+    });
+  }
+
+  rows.sort((a, b) => a.sortKey - b.sortKey);
+  return assignRanks(rows);
+}
+
+// Match Play par equipes (Ryder Cup) : matchplay brut classique pour chaque
+// paire, avec attribution de points par equipe.
+//   Match gagne          = 1 pt pour l'equipe du gagnant
+//   Match nul (AS final) = 0,5 pt pour chaque equipe
+//   Match en cours       = points provisoires (live) :
+//     - si AS : 0,5 chacun
+//     - si X up : 1 pt pour le leader, 0 pour l'autre
+function rankMatchplayTeam(enriched, holes, _players) {
+  const totalHoles = holes.length;
+  const pairs = [];
+  for (let i = 0; i + 1 < enriched.length; i += 2) {
+    pairs.push([enriched[i], enriched[i + 1]]);
+  }
+
+  const rows = [];
+
+  pairs.forEach((pair, idx) => {
+    const matchNum = idx + 1;
+    const [p1, p2] = pair;
+
+    let diff = 0; // > 0 : p1 mene
+    let holesPlayedTogether = 0;
+    let closedDiff = null;
+    let closedRemaining = null;
+
+    for (const h of holes) {
+      const ph1 = p1.perHole.find(x => x.num === h.num);
+      const ph2 = p2.perHole.find(x => x.num === h.num);
+      if (!ph1 || !ph2 || ph1.strokes == null || ph2.strokes == null) continue;
+
+      const s1 = ph1.strokes; // Brut uniquement (Ryder Cup)
+      const s2 = ph2.strokes;
+      if (s1 < s2) diff += 1;
+      else if (s2 < s1) diff -= 1;
+
+      holesPlayedTogether += 1;
+
+      if (closedDiff === null) {
+        const remaining = totalHoles - holesPlayedTogether;
+        if (Math.abs(diff) > remaining) {
+          closedDiff = diff;
+          closedRemaining = remaining;
+        }
+      }
+    }
+
+    let status, labelP1, labelP2, leaderId, p1Pts, p2Pts;
+
+    if (closedDiff !== null) {
+      status = 'closed';
+      const absD = Math.abs(closedDiff);
+      const tag = closedRemaining === 0 ? `${absD} up` : `${absD}&${closedRemaining}`;
+      if (closedDiff > 0) {
+        labelP1 = tag; labelP2 = '';
+        leaderId = p1.id; p1Pts = 1; p2Pts = 0;
+      } else {
+        labelP1 = ''; labelP2 = tag;
+        leaderId = p2.id; p1Pts = 0; p2Pts = 1;
+      }
+    } else if (holesPlayedTogether === totalHoles) {
+      if (diff === 0) {
+        status = 'final_AS';
+        labelP1 = labelP2 = 'AS';
+        leaderId = null; p1Pts = 0.5; p2Pts = 0.5;
+      } else {
+        status = 'final';
+        const absD = Math.abs(diff);
+        if (diff > 0) {
+          labelP1 = `${absD} up`; labelP2 = '';
+          leaderId = p1.id; p1Pts = 1; p2Pts = 0;
+        } else {
+          labelP1 = ''; labelP2 = `${absD} up`;
+          leaderId = p2.id; p1Pts = 0; p2Pts = 1;
+        }
+      }
+    } else {
+      status = 'ongoing';
+      if (diff === 0) {
+        labelP1 = labelP2 = 'AS';
+        leaderId = null; p1Pts = 0.5; p2Pts = 0.5;
+      } else {
+        const absD = Math.abs(diff);
+        if (diff > 0) {
+          labelP1 = `${absD} up`; labelP2 = '';
+          leaderId = p1.id; p1Pts = 1; p2Pts = 0;
+        } else {
+          labelP1 = ''; labelP2 = `${absD} up`;
+          leaderId = p2.id; p1Pts = 0; p2Pts = 1;
+        }
+      }
+    }
+
+    [p1, p2].forEach((p, posInPair) => {
+      const personalDiff = posInPair === 0 ? diff : -diff;
+      const opponent = posInPair === 0 ? p2 : p1;
+      const teamPoints = posInPair === 0 ? p1Pts : p2Pts;
+      rows.push({
+        playerId: p.id,
+        name: p.name,
+        handicap: p.handicap,
+        playingHcp: p.playingHcp,
+        holesPlayed: p.holesPlayed,
+        score: personalDiff,
+        scoreLabel: posInPair === 0 ? labelP1 : labelP2,
+        vsPar: null,
+        vsParLabel: '',
+        matchNum,
+        matchStatus: status,
+        isLeader: leaderId === p.id,
+        opponentId: opponent.id,
+        opponentName: opponent.name,
+        teamId: p.team_id,
+        teamName: p.team ? p.team.name : null,
+        teamColor: p.team ? p.team.color : null,
+        teamPoints,
+        sortKey: matchNum * 1000 - personalDiff
+      });
+    });
+  });
+
+  // Joueur orphelin (nombre impair) — ne devrait pas arriver
+  const pairedIds = new Set(rows.map(r => r.playerId));
+  for (const p of enriched) {
+    if (pairedIds.has(p.id)) continue;
+    rows.push({
+      playerId: p.id,
+      name: p.name,
+      handicap: p.handicap,
+      playingHcp: p.playingHcp,
+      holesPlayed: p.holesPlayed,
+      score: 0,
+      scoreLabel: 'Sans adversaire',
+      vsPar: null,
+      vsParLabel: '',
+      matchNum: 999,
+      matchStatus: 'no_pair',
+      isLeader: false,
+      opponentId: null,
+      opponentName: null,
+      teamId: p.team_id,
+      teamName: p.team ? p.team.name : null,
+      teamColor: p.team ? p.team.color : null,
+      teamPoints: 0,
       sortKey: 999000
     });
   }

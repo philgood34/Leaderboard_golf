@@ -50,6 +50,52 @@
     }
     body.lb-fullscreen #exit-fullscreen:hover { background:#b89651 }
 
+    /* Badges et tableau standings equipes (formule match_team) */
+    .team-badge {
+      display:inline-block; padding:1px 8px; border-radius:10px;
+      font-size:10px; font-weight:700; color:#fff; vertical-align:middle;
+      letter-spacing:0.5px; text-transform:uppercase;
+    }
+    .team-badge.team-rouge { background:#c0392b }
+    .team-badge.team-bleu  { background:#2c5aa0 }
+    .team-badge.team-vert  { background:#27ae60 }
+    .team-badge.team-jaune { background:#d4a017; color:#1a2419 }
+
+    .team-standings {
+      margin-bottom:14px; padding:12px; border-radius:8px;
+      background:#faf6e9; border-left:4px solid #c9a961;
+    }
+    .team-standings .ts-title {
+      font-size:11px; text-transform:uppercase; letter-spacing:0.8px;
+      color:#1a4d2e; font-weight:700; margin-bottom:8px;
+    }
+    .team-standings .ts-row {
+      display:flex; align-items:center; gap:10px; padding:6px 0;
+    }
+    .team-standings .ts-row .ts-color {
+      width:14px; height:14px; border-radius:50%; flex-shrink:0;
+    }
+    .team-standings .ts-row.team-rouge .ts-color { background:#c0392b }
+    .team-standings .ts-row.team-bleu  .ts-color { background:#2c5aa0 }
+    .team-standings .ts-row.team-vert  .ts-color { background:#27ae60 }
+    .team-standings .ts-row.team-jaune .ts-color { background:#d4a017 }
+    .team-standings .ts-name { flex:1; font-weight:700; font-size:15px; color:#1a4d2e }
+    .team-standings .ts-pts {
+      font-family:Georgia,serif; font-weight:700; font-size:22px;
+      color:#1a4d2e; min-width:50px; text-align:right;
+    }
+    .team-standings .ts-row.leading .ts-pts { color:#c9a961 }
+
+    body.lb-fullscreen .team-standings .ts-name { font-size:24px }
+    body.lb-fullscreen .team-standings .ts-pts { font-size:36px }
+    body.lb-fullscreen .team-standings .ts-row .ts-color { width:24px; height:24px }
+
+    /* Couleur de l'equipe en tete sur le score "X up" du match (Ryder Cup) */
+    .match-score.team-color-rouge { color:#c0392b; font-weight:700 }
+    .match-score.team-color-bleu  { color:#2c5aa0; font-weight:700 }
+    .match-score.team-color-vert  { color:#27ae60; font-weight:700 }
+    .match-score.team-color-jaune { color:#b8870c; font-weight:700 }
+
     /* Score picker overlay : scrollable digit picker au clic d'une case */
     .score-picker-overlay {
       position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:200;
@@ -353,15 +399,22 @@
       const player = state.players.find(p => p.id === selectedPlayerId);
       let helpHtml = '';
       if (hole && player) {
-        const recv = strokesOnHole(player.playingHcp, hole.si);
-        const recvLbl = recv === 0 ? '0' : (recv > 0 ? '+' + recv : String(recv));
-        const parNet = hole.par + recv;
-        const pickupAt = hole.par + 1 + recv;
-        helpHtml = `
-          <div class="score-picker-help">
-            <div>Par <strong>${hole.par}</strong> &middot; recus <strong>${recvLbl}</strong> &middot; par net <strong>${parNet}</strong></div>
-            <div class="pickup">Ramasse a partir de <strong>${pickupAt}</strong> coups (croix)</div>
-          </div>`;
+        // Formules brut-only : pas de coups recus, pas d'aide stableford net
+        const f = state.game.formula;
+        const brutOnly = f === 'match_brut' || f === 'match_team' || f === 'chicago' || f === 'stroke_brut';
+        if (brutOnly) {
+          helpHtml = `<div class="score-picker-help"><div>Par <strong>${hole.par}</strong></div></div>`;
+        } else {
+          const recv = strokesOnHole(player.playingHcp, hole.si);
+          const recvLbl = recv === 0 ? '0' : (recv > 0 ? '+' + recv : String(recv));
+          const parNet = hole.par + recv;
+          const pickupAt = hole.par + 1 + recv;
+          helpHtml = `
+            <div class="score-picker-help">
+              <div>Par <strong>${hole.par}</strong> &middot; recus <strong>${recvLbl}</strong> &middot; par net <strong>${parNet}</strong></div>
+              <div class="pickup">Ramasse a partir de <strong>${pickupAt}</strong> coups si balle non rentree (croix)</div>
+            </div>`;
+        }
       }
       const overlay = document.createElement('div');
       overlay.className = 'score-picker-overlay';
@@ -494,13 +547,43 @@
       }
       const matchKeys = Object.keys(matches).sort((a, b) => Number(a) - Number(b));
       const hcount = holesCount();
+      const isTeam = state.game.formula === 'match_team';
 
-      div.innerHTML = matchKeys.map(k => {
+      // Standings d'equipes : agrege les teamPoints des rows (live)
+      let standingsHtml = '';
+      if (isTeam) {
+        const totals = {};
+        for (const r of lb) {
+          if (!r.teamId) continue;
+          if (!totals[r.teamId]) totals[r.teamId] = { teamId: r.teamId, name: r.teamName, color: r.teamColor, pts: 0 };
+          totals[r.teamId].pts += (r.teamPoints || 0);
+        }
+        const standings = Object.values(totals).sort((a, b) => b.pts - a.pts);
+        const maxPts = standings.length ? standings[0].pts : 0;
+        const fmt = n => Number.isInteger(n) ? String(n) : n.toFixed(1);
+        standingsHtml = `<div class="team-standings">
+          <div class="ts-title">Classement equipes (live)</div>
+          ${standings.map(t => `
+            <div class="ts-row team-${t.color} ${t.pts === maxPts && maxPts > 0 ? 'leading' : ''}">
+              <span class="ts-color"></span>
+              <span class="ts-name">${escapeHtml(t.name || '')}</span>
+              <span class="ts-pts">${fmt(t.pts)}</span>
+            </div>
+          `).join('')}
+        </div>`;
+      }
+
+      // Helper pour le badge couleur d'un joueur
+      const teamBadge = r => isTeam && r.teamColor && r.teamName
+        ? ` <span class="team-badge team-${r.teamColor}">${escapeHtml(r.teamName)}</span>`
+        : '';
+
+      div.innerHTML = standingsHtml + matchKeys.map(k => {
         const rows = matches[k];
         if (k === '999') {
           return rows.map(r => `<div class="match-card no-pair">
             <div class="match-num">Sans adversaire</div>
-            <div class="match-row"><span class="player-name">${escapeHtml(r.name)}</span><span class="match-score muted">${escapeHtml(r.scoreLabel)}</span></div>
+            <div class="match-row"><span class="player-name">${escapeHtml(r.name)}${teamBadge(r)}</span><span class="match-score muted">${escapeHtml(r.scoreLabel)}</span></div>
           </div>`).join('');
         }
 
@@ -515,9 +598,13 @@
           ${rows.map(r => {
             const meCls = r.playerId === me ? ' me' : '';
             const leaderCls = r.isLeader ? ' leader' : '';
+            // Couleur de l'equipe sur le label "X up" : applique uniquement si
+            // le label n'est pas vide et n'est pas AS (qui reste blanc/neutre).
+            const scoreColorCls = isTeam && r.scoreLabel && r.scoreLabel !== 'AS' && r.teamColor
+              ? ` team-color-${r.teamColor}` : '';
             return `<div class="match-row${meCls}${leaderCls}">
-              <span class="player-name">${r.isLeader ? '<svg class="trophy-mini" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v3a5 5 0 0010 0V4H7zm-3 1v2a3 3 0 003 3v-1a2 2 0 01-2-2V5H4zm14 0v2a2 2 0 01-2 2v1a3 3 0 003-3V5h-1zM10 14h4v2H10v-2zm-2 4h8v2H8v-2z"/></svg> ' : ''}${escapeHtml(r.name)} <span class="muted" style="font-size:12px">(${r.handicap}/${r.playingHcp})</span></span>
-              <span class="match-score">${escapeHtml(r.scoreLabel)}</span>
+              <span class="player-name">${r.isLeader ? '<svg class="trophy-mini" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v3a5 5 0 0010 0V4H7zm-3 1v2a3 3 0 003 3v-1a2 2 0 01-2-2V5H4zm14 0v2a2 2 0 01-2 2v1a3 3 0 003-3V5h-1zM10 14h4v2H10v-2zm-2 4h8v2H8v-2z"/></svg> ' : ''}${escapeHtml(r.name)}${teamBadge(r)} <span class="muted" style="font-size:12px">(${r.handicap}/${r.playingHcp})</span></span>
+              <span class="match-score${scoreColorCls}">${escapeHtml(r.scoreLabel)}</span>
             </div>`;
           }).join('')}
           <div class="match-progress muted">${totalHolesPlayed}/${hcount} trous joués</div>
@@ -530,6 +617,9 @@
       if (!player) return;
       const playerScores = state.scores[selectedPlayerId] || {};
       const hcount = holesCount();
+      // Formules brut-only : pas de coups recus a afficher
+      const f = state.game.formula;
+      const brutOnly = f === 'match_brut' || f === 'match_team' || f === 'chicago' || f === 'stroke_brut';
 
       function buildGrid(holesSlice) {
         const headers = [], scores = [];
@@ -546,7 +636,7 @@
           }
           const active = h.num === selectedHole ? ' active' : '';
           const popCls = lastSetCell === `${selectedPlayerId}:${h.num}` ? ' pop' : '';
-          const recv = strokesOnHole(player.playingHcp, h.si);
+          const recv = brutOnly ? 0 : strokesOnHole(player.playingHcp, h.si);
           let recvBadge = '';
           if (recv > 0) {
             recvBadge = `<span class="recv-badge" title="Coup${recv > 1 ? 's' : ''} reçu${recv > 1 ? 's' : ''} : ${recv}">+${recv}</span>`;

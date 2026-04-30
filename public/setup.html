@@ -7,6 +7,46 @@
   <meta name="theme-color" content="#1a4d2e">
   <title>Configurer la partie - Leaderboard Golf</title>
   <link rel="stylesheet" href="/style.css">
+  <style>
+    /* Badges couleur equipes */
+    .team-badge {
+      display:inline-block; padding:2px 10px; border-radius:12px;
+      font-size:12px; font-weight:700; color:#fff;
+      vertical-align:middle;
+    }
+    .team-badge.team-rouge { background:#c0392b }
+    .team-badge.team-bleu  { background:#2c5aa0 }
+    .team-badge.team-vert  { background:#27ae60 }
+    .team-badge.team-jaune { background:#d4a017; color:#1a2419 }
+    .team-row {
+      display:flex; align-items:center; gap:10px; padding:8px 10px;
+      background:#faf6e9; border-radius:6px; margin-bottom:6px;
+    }
+    .team-row .team-name { flex:1; font-weight:600 }
+    .pair-warn {
+      background:#fee; color:#c0392b; padding:6px 10px; border-radius:4px;
+      font-size:12px; margin-top:6px;
+    }
+    /* Cards de match (formule match_team) */
+    .setup-match-card {
+      border:1px solid #d4c896; border-radius:8px; padding:10px 12px;
+      margin-bottom:10px; background:#fff;
+    }
+    .setup-match-card.invalid { border-color:#c0392b; background:#fef5f4 }
+    .setup-match-card .match-num {
+      font-size:11px; text-transform:uppercase; letter-spacing:0.5px;
+      color:#1a4d2e; font-weight:700; margin-bottom:6px;
+    }
+    .setup-match-card .player-line {
+      display:flex; align-items:center; gap:8px; padding:6px 0;
+      border-top:1px dashed #e8e0c8;
+    }
+    .setup-match-card .player-line:first-of-type { border-top:none }
+    .setup-match-card .pl-pos { font-family:Georgia,serif; color:#1a4d2e; font-weight:700; min-width:24px }
+    .setup-match-card .pl-name { flex:1; font-weight:600 }
+    .setup-match-card .pl-meta { font-size:11px; color:#6b6b6b }
+    .setup-match-card .pl-actions { white-space:nowrap }
+  </style>
 </head>
 <body>
   <h1>
@@ -34,6 +74,7 @@
       <option value="stroke" selected>Stroke Play</option>
       <option value="match_brut">Matchplay Brut</option>
       <option value="match_net">Matchplay Net</option>
+      <option value="match_team">Match Play par equipes (Ryder)</option>
       <option value="chicago">Chicago</option>
     </select>
 
@@ -52,6 +93,28 @@
 
   <div id="step-players" class="card" style="display:none">
     <h2>Le flight</h2>
+
+    <!-- Section equipes : visible seulement pour match_team -->
+    <div id="teams-block" style="display:none; margin-bottom:18px">
+      <h2 style="margin-top:0">Equipes</h2>
+      <div id="teams-list" style="margin-bottom:10px"></div>
+
+      <div class="card cream" style="margin:0; padding:12px; border-left:none; box-shadow:none">
+        <label>Nom de l'equipe</label>
+        <input type="text" id="t-name" placeholder="Ex: Les Aigles" autocomplete="off" data-form-type="other" data-lpignore="true" data-1p-ignore="true" data-bwignore>
+        <label>Couleur</label>
+        <select id="t-color">
+          <option value="rouge">Rouge</option>
+          <option value="bleu">Bleu</option>
+          <option value="vert">Vert</option>
+          <option value="jaune">Jaune</option>
+        </select>
+        <button id="add-team-btn" style="margin-top:10px">Ajouter l'equipe</button>
+        <div id="add-team-error" class="error"></div>
+      </div>
+    </div>
+
+    <button id="auto-pair-btn" class="secondary" style="display:none;margin-bottom:10px;width:100%">Constituer les matchs automatiquement</button>
     <div id="players-list" style="margin-bottom:14px"></div>
 
     <div class="card cream" style="margin:0; padding: 14px; border-left: none; box-shadow: none">
@@ -67,6 +130,11 @@
 
       <label>Depart (couleur)</label>
       <select id="p-tee"></select>
+
+      <div id="p-team-row" style="display:none">
+        <label>Equipe</label>
+        <select id="p-team"></select>
+      </div>
 
       <label>Index (HCP)</label>
       <input type="number" id="p-hcp" step="0.1" placeholder="Ex: 18.4" inputmode="decimal">
@@ -88,6 +156,7 @@
     let courses = [];
     let selectedCourseId = null;
     let currentPlayers = []; // dernier etat des joueurs, utilise pour valider l'unicite du nom
+    let currentTeams = [];   // dernier etat des equipes (formule match_team)
 
     function authHeaders() { return gameCode ? { 'X-Game-Code': gameCode } : {}; }
 
@@ -203,15 +272,181 @@
 
     function showPlayersStep(data) {
       gameFormula = data.game && data.game.formula;
+      const isTeam = gameFormula === 'match_team';
       // S'assure que selectedCourseId pointe sur le parcours de la partie en cours
       if (data.game && data.game.course_id) selectedCourseId = data.game.course_id;
       refreshTeeSelect();
+      // Affichage du bloc equipes uniquement pour match_team
+      document.getElementById('teams-block').style.display = isTeam ? 'block' : 'none';
+      document.getElementById('p-team-row').style.display  = isTeam ? 'block' : 'none';
+      document.getElementById('auto-pair-btn').style.display = isTeam ? 'block' : 'none';
       document.getElementById('step-players').style.display = 'block';
+      currentTeams = data.teams || [];
+      renderTeams(currentTeams);
+      refreshTeamSelect();
       renderPlayers(data.players || []);
       const sock = io();
       sock.emit('join', { gameId, code: gameCode });
-      sock.on('game:update', d => renderPlayers(d.players));
+      sock.on('game:update', d => {
+        currentTeams = d.teams || [];
+        renderTeams(currentTeams);
+        refreshTeamSelect();
+        renderPlayers(d.players);
+      });
     }
+
+    function renderTeams(teams) {
+      const div = document.getElementById('teams-list');
+      if (!teams.length) {
+        div.innerHTML = '<p class="muted" style="font-size:13px;text-align:center;padding:6px 0">Aucune equipe. Ajoute au moins 2 equipes.</p>';
+        return;
+      }
+      div.innerHTML = teams.map(t => `
+        <div class="team-row">
+          <span class="team-badge team-${t.color}">${escapeHtml(t.name)}</span>
+          <span class="team-name muted">(${t.color})</span>
+          <button class="small danger" data-del-team="${t.id}" title="Retirer cette equipe">×</button>
+        </div>
+      `).join('');
+      div.querySelectorAll('[data-del-team]').forEach(b => b.addEventListener('click', async () => {
+        if (!confirm("Supprimer cette equipe ? Les joueurs assignes seront desassigne.")) return;
+        await fetch(`/api/games/${gameId}/teams/${b.dataset.delTeam}`, { method: 'DELETE', headers: authHeaders() });
+      }));
+    }
+
+    // Rendu specifique match_team : chaque match dans une card visuellement separee
+    function renderTeamMatchCards(div, players) {
+      const findTeam = id => currentTeams.find(t => t.id === id);
+      const teamBadge = p => {
+        if (!p.team_id) return '<span class="muted" style="font-size:11px;color:#c0392b">sans equipe</span>';
+        const t = findTeam(p.team_id);
+        return t ? `<span class="team-badge team-${t.color}">${escapeHtml(t.name)}</span>` : '';
+      };
+      const sexLbl = p => p.sex === 'M' ? 'H' : 'F';
+      const renderPlayerLine = (p, idx, total) => `
+        <div class="player-line">
+          <span class="pl-pos">${idx + 1}.</span>
+          <span class="pl-name">${escapeHtml(p.name)}</span>
+          ${teamBadge(p)}
+          <span class="pl-meta">(${sexLbl(p)} &middot; ${p.handicap}/${p.playingHcp})</span>
+          <span class="pl-actions">
+            ${idx > 0 ? `<button class="small secondary" data-move="up" data-pid="${p.id}" title="Monter">↑</button>` : '<span style="display:inline-block;width:30px"></span>'}
+            ${idx < total - 1 ? `<button class="small secondary" data-move="down" data-pid="${p.id}" title="Descendre">↓</button>` : '<span style="display:inline-block;width:30px"></span>'}
+            <button class="small danger" data-del="${p.id}" title="Retirer">×</button>
+          </span>
+        </div>`;
+
+      let html = '';
+      const total = players.length;
+      let i = 0;
+      let matchNum = 1;
+      while (i + 1 < total) {
+        const p1 = players[i], p2 = players[i + 1];
+        const sameTeam = p1.team_id && p2.team_id && p1.team_id === p2.team_id;
+        const cls = sameTeam ? 'setup-match-card invalid' : 'setup-match-card';
+        html += `<div class="${cls}">
+          <div class="match-num">Match ${matchNum}</div>
+          ${renderPlayerLine(p1, i, total)}
+          ${renderPlayerLine(p2, i + 1, total)}
+          ${sameTeam ? '<div class="pair-warn">⚠️ Meme equipe — utilise les fleches ou le bouton "Constituer les matchs"</div>' : ''}
+        </div>`;
+        i += 2;
+        matchNum += 1;
+      }
+      // Joueur orphelin (nombre impair)
+      if (i < total) {
+        const p = players[i];
+        html += `<div class="setup-match-card invalid">
+          <div class="match-num">Sans adversaire</div>
+          ${renderPlayerLine(p, i, total)}
+          <div class="pair-warn">⚠️ Nombre impair de joueurs — ajoute ou retire un joueur</div>
+        </div>`;
+      }
+
+      div.innerHTML = html;
+
+      div.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
+        await fetch(`/api/games/${gameId}/players/${b.dataset.del}`, { method: 'DELETE', headers: authHeaders() });
+      }));
+      div.querySelectorAll('[data-move]').forEach(b => b.addEventListener('click', async () => {
+        await fetch(`/api/games/${gameId}/players/${b.dataset.pid}/move`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ direction: b.dataset.move })
+        });
+      }));
+    }
+
+    // Auto-pair : reorganise les joueurs pour former des matchs cross-team
+    // Heuristique : pour 2 equipes, trie chaque equipe par sexe (F d'abord) puis
+    // par index croissant, puis zip. Pour 3+ equipes, alterne en round-robin.
+    async function autoPairTeams() {
+      if (currentTeams.length < 2) { alert('Au moins 2 equipes requises'); return; }
+      const sortKey = (a, b) => {
+        if (a.sex !== b.sex) return a.sex === 'F' ? -1 : 1;
+        return Number(a.handicap) - Number(b.handicap);
+      };
+      // Groupe par equipe
+      const byTeam = {};
+      for (const t of currentTeams) byTeam[t.id] = [];
+      for (const p of currentPlayers) {
+        if (!p.team_id || !byTeam[p.team_id]) continue; // joueurs sans equipe : ignores
+        byTeam[p.team_id].push(p);
+      }
+      for (const tid in byTeam) byTeam[tid].sort(sortKey);
+
+      // Round-robin entre les equipes : on prend chaque equipe a tour de role.
+      // Pour 2 equipes ca donne A0,B0,A1,B1,... (= zip parfait).
+      const newOrder = [];
+      const teamIds = currentTeams.map(t => t.id);
+      let added = true;
+      while (added) {
+        added = false;
+        for (const tid of teamIds) {
+          const arr = byTeam[tid];
+          if (arr.length) { newOrder.push(arr.shift()); added = true; }
+        }
+      }
+
+      // Joueurs sans equipe : on les met a la fin
+      for (const p of currentPlayers) {
+        if (!newOrder.find(x => x.id === p.id)) newOrder.push(p);
+      }
+
+      const order = newOrder.map(p => p.id);
+      await fetch(`/api/games/${gameId}/players/reorder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ order })
+      });
+    }
+    document.getElementById('auto-pair-btn').addEventListener('click', autoPairTeams);
+
+    function refreshTeamSelect() {
+      const sel = document.getElementById('p-team');
+      const previous = sel.value;
+      if (!currentTeams.length) {
+        sel.innerHTML = '<option value="">(creer une equipe d\'abord)</option>';
+        return;
+      }
+      sel.innerHTML = currentTeams.map(t => `<option value="${t.id}">${escapeHtml(t.name)} (${t.color})</option>`).join('');
+      if (previous && currentTeams.find(t => String(t.id) === previous)) sel.value = previous;
+    }
+
+    document.getElementById('add-team-btn').addEventListener('click', async () => {
+      const name = document.getElementById('t-name').value.trim();
+      const color = document.getElementById('t-color').value;
+      const err = document.getElementById('add-team-error');
+      err.classList.remove('show'); err.textContent = '';
+      if (!name) { showError(err, 'Nom equipe requis'); return; }
+      const res = await fetch(`/api/games/${gameId}/teams`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ name, color })
+      });
+      if (!res.ok) { showError(err, (await res.json()).error || 'Erreur'); return; }
+      document.getElementById('t-name').value = '';
+      document.getElementById('t-name').focus();
+    });
 
     function renderPlayers(players) {
       currentPlayers = players || [];
@@ -222,15 +457,26 @@
       }
 
       const isMatchplay = gameFormula && gameFormula.startsWith('match_');
+      const isTeam = gameFormula === 'match_team';
+
+      // En match_team : rendu par cards de match (au lieu de la table flat)
+      if (isTeam) { renderTeamMatchCards(div, players); return; }
 
       const teeLbl = p => p.tee_color ? (TEE_LABELS[p.tee_color] || p.tee_color) : '-';
+      const teamBadge = p => {
+        if (!p.team_id) return '<span class="muted" style="font-size:11px;color:#c0392b">sans equipe</span>';
+        const t = currentTeams.find(t => t.id === p.team_id);
+        if (!t) return '';
+        return `<span class="team-badge team-${t.color}">${escapeHtml(t.name)}</span>`;
+      };
       let html = `<table>
-        <thead><tr><th>${isMatchplay ? '#' : 'Joueur'}</th><th>${isMatchplay ? 'Joueur' : 'Sexe'}</th><th>Depart</th><th class="lb-score">Index</th><th class="lb-score">Jeu</th><th></th></tr></thead>
+        <thead><tr><th>${isMatchplay ? '#' : 'Joueur'}</th><th>${isMatchplay ? 'Joueur' : 'Sexe'}</th>${isTeam ? '<th>Equipe</th>' : ''}<th>Depart</th><th class="lb-score">Index</th><th class="lb-score">Jeu</th><th></th></tr></thead>
         <tbody>${players.map((p, i) => `
           <tr>
             ${isMatchplay
               ? `<td style="font-family:Georgia,serif;color:#1a4d2e;font-weight:700">${i + 1}</td><td><strong>${escapeHtml(p.name)}</strong> <span class="muted" style="font-size:11px">(${p.sex === 'M' ? 'H' : 'F'})</span></td>`
               : `<td><strong>${escapeHtml(p.name)}</strong></td><td>${p.sex === 'M' ? 'H' : 'F'}</td>`}
+            ${isTeam ? `<td>${teamBadge(p)}</td>` : ''}
             <td><span class="muted" style="font-size:12px">${teeLbl(p)}</span></td>
             <td class="lb-score">${p.handicap}</td>
             <td class="lb-score"><strong>${p.playingHcp}</strong></td>
@@ -250,11 +496,19 @@
         } else {
           const pairs = [];
           for (let i = 0; i + 1 < players.length; i += 2) pairs.push([players[i], players[i + 1]]);
+          const findTeam = id => currentTeams.find(t => t.id === id);
           html += `<div style="margin-top:14px;padding:12px;background:#faf6e9;border-radius:6px;border-left:3px solid #c9a961">
             <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:#1a4d2e;font-weight:700;margin-bottom:8px">Tableau des matchs</div>
-            ${pairs.map((pr, i) => `<div style="font-size:14px;margin:4px 0;color:#1a2419">
-              <strong style="color:#1a4d2e">Match ${i + 1}</strong> &nbsp;${escapeHtml(pr[0].name)} <span class="muted">vs</span> ${escapeHtml(pr[1].name)}
-            </div>`).join('')}
+            ${pairs.map((pr, i) => {
+              const sameTeam = isTeam && pr[0].team_id && pr[1].team_id && pr[0].team_id === pr[1].team_id;
+              const t1 = isTeam ? findTeam(pr[0].team_id) : null;
+              const t2 = isTeam ? findTeam(pr[1].team_id) : null;
+              const b = (p, t) => isTeam && t ? `<span class="team-badge team-${t.color}" style="font-size:10px;padding:1px 6px">${escapeHtml(t.name)}</span>` : '';
+              return `<div style="font-size:14px;margin:4px 0;color:#1a2419">
+                <strong style="color:#1a4d2e">Match ${i + 1}</strong> &nbsp;${escapeHtml(pr[0].name)} ${b(pr[0], t1)} <span class="muted">vs</span> ${escapeHtml(pr[1].name)} ${b(pr[1], t2)}
+                ${sameTeam ? '<div class="pair-warn">⚠️ Meme equipe — les 2 joueurs doivent etre d\'equipes differentes</div>' : ''}
+              </div>`;
+            }).join('')}
             <div class="muted" style="font-size:11px;margin-top:8px">💡 Utilise les flèches ↑ ↓ pour réorganiser les paires.</div>
           </div>`;
         }
@@ -313,9 +567,16 @@
       if (!name) { showError(err, 'Nom requis'); return; }
       if (isNameTaken(name)) { showError(err, `Nom deja utilise dans ce flight : ${name}`); return; }
       if (handicap === '') { showError(err, 'Index requis'); return; }
+      const isTeam = gameFormula === 'match_team';
+      let team_id = null;
+      if (isTeam) {
+        if (!currentTeams.length) { showError(err, 'Cree au moins une equipe avant d\'ajouter un joueur'); return; }
+        team_id = document.getElementById('p-team').value || null;
+        if (!team_id) { showError(err, 'Selectionne une equipe'); return; }
+      }
       const res = await fetch(`/api/games/${gameId}/players`, {
         method: 'POST', headers: {'Content-Type': 'application/json', ...authHeaders()},
-        body: JSON.stringify({ name, sex, handicap: Number(handicap), tee_color })
+        body: JSON.stringify({ name, sex, handicap: Number(handicap), tee_color, team_id })
       });
       if (!res.ok) { showError(err, (await res.json()).error || 'Erreur'); return; }
       document.getElementById('p-name').value = '';
