@@ -90,6 +90,22 @@
     body.lb-fullscreen .team-standings .ts-pts { font-size:36px }
     body.lb-fullscreen .team-standings .ts-row .ts-color { width:24px; height:24px }
 
+    /* Tooltip custom (desktop : hover, mobile : tap) */
+    .hcp-info { position:relative; cursor:help; user-select:none }
+    .hcp-info .hcp-tip {
+      display:none; position:absolute; bottom:calc(100% + 6px); left:50%;
+      transform:translateX(-50%); background:#1a2419; color:#fff;
+      padding:8px 12px; border-radius:6px; font-size:12px; line-height:1.4;
+      white-space:nowrap; z-index:300; box-shadow:0 4px 12px rgba(0,0,0,0.3);
+      pointer-events:none;
+    }
+    .hcp-info .hcp-tip::after {
+      content:''; position:absolute; top:100%; left:50%; transform:translateX(-50%);
+      border:6px solid transparent; border-top-color:#1a2419;
+    }
+    .hcp-info:hover .hcp-tip,
+    .hcp-info.show .hcp-tip { display:block }
+
     /* Couleur de l'equipe en tete sur le score "X up" du match (Ryder Cup) */
     .match-score.team-color-rouge { color:#c0392b; font-weight:700 }
     .match-score.team-color-bleu  { color:#2c5aa0; font-weight:700 }
@@ -251,6 +267,7 @@
         <button id="exit-fullscreen" class="secondary" style="display:none">← Retour</button>
       </div>
       <button id="toggle-lb-stableford" class="secondary" style="margin-top:10px;margin-bottom:10px;width:100%;display:none">Score en stableford</button>
+      <button id="show-chicago-points" class="secondary" style="margin-top:10px;margin-bottom:10px;width:100%;display:none">Tableau des points Chicago</button>
       <div id="leaderboard"></div>
     </div>
 
@@ -540,6 +557,10 @@
       stbBtn.style.display = isStrokeBoth ? '' : 'none';
       if (!isStrokeBoth) lbViewStableford = false;
 
+      // Affiche/masque le bouton recap Chicago
+      const isChicago = state.game.formula === 'chicago';
+      document.getElementById('show-chicago-points').style.display = isChicago ? '' : 'none';
+
       if (isMatchplay()) {
         renderMatchplayLeaderboard(div, lb);
         return;
@@ -586,7 +607,7 @@
           : r.rank;
         return `<tr class="lb-clickable${meRow}${rank1}${selCls}" data-player-id="${r.playerId}">
           <td class="lb-rank">${rankCell}</td>
-          <td>${escapeHtml(r.name)} <span class="muted" style="font-size:12px">(${r.handicap}/${r.playingHcp})</span></td>
+          <td>${escapeHtml(r.name)}</td>
           ${isStrokeBoth && lbViewStableford
             ? `<td class="lb-score">${escapeHtml(r.stbBrutLabel)}</td><td class="lb-score"><strong>${escapeHtml(r.stbNetLabel)}</strong></td>`
             : (isStrokeBoth
@@ -602,7 +623,16 @@
 
     function bindLeaderboardClicks(div) {
       div.querySelectorAll('[data-player-id]').forEach(el => {
-        el.addEventListener('click', () => {
+        el.addEventListener('click', e => {
+          // Si le clic vient du badge HCP : afficher tooltip + ne pas selectionner
+          const tip = e.target.closest && e.target.closest('.hcp-info');
+          if (tip) {
+            e.stopPropagation();
+            // Toggle mobile : ferme les autres puis ouvre/ferme celui-ci
+            document.querySelectorAll('.hcp-info.show').forEach(t => { if (t !== tip) t.classList.remove('show'); });
+            tip.classList.toggle('show');
+            return;
+          }
           const pid = Number(el.dataset.playerId);
           if (!pid) return;
           selectedPlayerId = pid;
@@ -612,10 +642,53 @@
       });
     }
 
+    // Ferme les tooltips HCP quand on clique ailleurs
+    document.addEventListener('click', e => {
+      if (e.target.closest && e.target.closest('.hcp-info')) return;
+      document.querySelectorAll('.hcp-info.show').forEach(t => t.classList.remove('show'));
+    });
+
     document.getElementById('toggle-lb-stableford').addEventListener('click', () => {
       lbViewStableford = !lbViewStableford;
       document.getElementById('toggle-lb-stableford').textContent = lbViewStableford ? 'Score brut / net' : 'Score en stableford';
       renderLeaderboard();
+    });
+
+    // Recap des points Chicago : modal informatif
+    document.getElementById('show-chicago-points').addEventListener('click', () => {
+      const overlay = document.createElement('div');
+      overlay.className = 'score-picker-overlay';
+      overlay.innerHTML = `
+        <div class="score-picker" style="width:280px">
+          <div class="header">
+            Points Chicago
+            <div class="sub">Score brut vs Par du trou</div>
+          </div>
+          <table style="width:100%;font-size:14px;border-collapse:collapse;margin-top:6px">
+            <thead><tr style="border-bottom:1px solid #d4c896;font-size:11px;text-transform:uppercase;color:#1a4d2e">
+              <th style="text-align:left;padding:6px 4px">Score</th>
+              <th style="text-align:right;padding:6px 4px">Points</th>
+            </tr></thead>
+            <tbody>
+              <tr><td style="padding:6px 4px">Eagle ou mieux (-2)</td><td style="text-align:right;padding:6px 4px;font-weight:700">+8</td></tr>
+              <tr><td style="padding:6px 4px">Birdie (-1)</td><td style="text-align:right;padding:6px 4px;font-weight:700">+4</td></tr>
+              <tr><td style="padding:6px 4px">Par</td><td style="text-align:right;padding:6px 4px;font-weight:700">+2</td></tr>
+              <tr><td style="padding:6px 4px">Bogey (+1)</td><td style="text-align:right;padding:6px 4px;font-weight:700">+1</td></tr>
+              <tr><td style="padding:6px 4px">Double bogey (+2)</td><td style="text-align:right;padding:6px 4px;font-weight:700">0</td></tr>
+              <tr><td style="padding:6px 4px">Triple bogey ou pire (+3)</td><td style="text-align:right;padding:6px 4px;font-weight:700;color:#c0392b">-1</td></tr>
+            </tbody>
+          </table>
+          <div style="margin-top:12px;padding:10px;background:#faf6e9;border-radius:6px;font-size:12px;color:#1a4d2e">
+            <strong>Quota</strong> = 39 - HCP de jeu<br>
+            <strong>Score final</strong> = Total points - Quota<br>
+            Le plus haut total gagne.
+          </div>
+          <button class="clear" data-close="1">Fermer</button>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.addEventListener('click', e => {
+        if (e.target === overlay || (e.target.dataset && e.target.dataset.close)) overlay.remove();
+      });
     });
 
     // Plein ecran 100% CSS : pas d'API browser fullscreen pour eviter les
@@ -703,7 +776,7 @@
             const scoreColorCls = isTeam && r.scoreLabel && r.scoreLabel !== 'AS' && r.teamColor
               ? ` team-color-${r.teamColor}` : '';
             return `<div class="match-row lb-clickable${meCls}${leaderCls}${selCls}" data-player-id="${r.playerId}">
-              <span class="player-name">${r.isLeader ? '<svg class="trophy-mini" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v3a5 5 0 0010 0V4H7zm-3 1v2a3 3 0 003 3v-1a2 2 0 01-2-2V5H4zm14 0v2a2 2 0 01-2 2v1a3 3 0 003-3V5h-1zM10 14h4v2H10v-2zm-2 4h8v2H8v-2z"/></svg> ' : ''}${escapeHtml(r.name)}${teamBadge(r)} <span class="muted" style="font-size:12px">(${r.handicap}/${r.playingHcp})</span></span>
+              <span class="player-name">${r.isLeader ? '<svg class="trophy-mini" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v3a5 5 0 0010 0V4H7zm-3 1v2a3 3 0 003 3v-1a2 2 0 01-2-2V5H4zm14 0v2a2 2 0 01-2 2v1a3 3 0 003-3V5h-1zM10 14h4v2H10v-2zm-2 4h8v2H8v-2z"/></svg> ' : ''}${escapeHtml(r.name)}${teamBadge(r)}</span>
               <span class="match-score${scoreColorCls}">${escapeHtml(r.scoreLabel)}</span>
             </div>`;
           }).join('')}
@@ -880,8 +953,17 @@
     }
 
     document.getElementById('finish-btn').addEventListener('click', async () => {
-      if (!confirm('Terminer la partie pour tout le monde ?')) return;
-      await fetch(`/api/games/${state.game.id}/finish`, { method: 'POST', headers: authHeaders() });
+      const pin = prompt('Code PIN pour terminer la partie :');
+      if (pin === null) return; // cancel
+      const res = await fetch(`/api/games/${state.game.id}/finish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ pin: pin.trim() })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || 'Erreur');
+      }
     });
 
     // ===== Confetti + modal de fin =====

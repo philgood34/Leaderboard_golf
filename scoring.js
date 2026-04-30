@@ -45,13 +45,17 @@ function strokesOnHole(playingHcp, si) {
   }
 }
 
-// Points Chicago (gross vs par) : bogey+ = 1, par = 2, birdie = 4, eagle+ = 8.
+// Points Chicago (gross vs par) :
+//   eagle+ (-2 ou mieux) = 8 ; birdie (-1) = 4 ; par = 2 ;
+//   bogey (+1) = 1 ; double bogey (+2) = 0 ; triple+ (+3 ou pire) = -1.
 function chicagoPoints(grossStrokes, par) {
   const diff = grossStrokes - par;
   if (diff <= -2) return 8;
   if (diff === -1) return 4;
   if (diff === 0)  return 2;
-  return 1; // bogey ou pire
+  if (diff === 1)  return 1;
+  if (diff === 2)  return 0;
+  return -1; // triple bogey ou pire
 }
 
 // Points Stableford : pts = max(0, 2 - (score - par))

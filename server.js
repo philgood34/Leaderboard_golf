@@ -434,8 +434,16 @@ app.post('/api/games/:id/scores', requireGameAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+// PIN requis pour fermer la partie (anti-clic accidentel ou par autre joueur)
+// Override possible via env FINISH_PIN ; valeur par defaut : 2749
+const FINISH_PIN = process.env.FINISH_PIN || '2749';
+
 app.post('/api/games/:id/finish', requireGameAuth, (req, res) => {
   const gameId = Number(req.params.id);
+  const { pin } = req.body || {};
+  if (String(pin || '') !== FINISH_PIN) {
+    return res.status(401).json({ error: 'Code PIN invalide' });
+  }
   db.prepare(`UPDATE games SET status = 'closed', closed_at = CURRENT_TIMESTAMP WHERE id = ?`).run(gameId);
   broadcastGame(gameId);
   res.json({ ok: true });

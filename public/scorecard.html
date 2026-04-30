@@ -126,7 +126,7 @@
         return `<div class="match-card ${cls}">
           <div class="match-num">Match ${k}</div>
           ${rows.map(r => `<div class="match-row${r.isLeader ? ' leader' : ''}">
-            <span class="player-name">${escapeHtml(r.name)} <span class="muted" style="font-size:11px">(${r.handicap}/${r.playingHcp})</span></span>
+            <span class="player-name">${escapeHtml(r.name)}</span>
             <span class="match-score">${escapeHtml(r.scoreLabel)}</span>
           </div>`).join('')}
         </div>`;
