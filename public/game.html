@@ -96,6 +96,14 @@
     .match-score.team-color-vert  { color:#27ae60; font-weight:700 }
     .match-score.team-color-jaune { color:#b8870c; font-weight:700 }
 
+    /* Joueur cliquable dans le leaderboard (selectionne sa carte de score) */
+    .lb-clickable { cursor:pointer; transition:background 0.15s }
+    tr.lb-clickable:hover { background:#faf6e9 }
+    .match-row.lb-clickable:hover { background:#faf6e9 }
+    tr.lb-clickable.is-selected { background:#fff3d9; box-shadow:inset 4px 0 0 #c9a961 }
+    tr.lb-clickable.is-selected td:first-child { box-shadow:inset 4px 0 0 #c9a961 }
+    .match-row.lb-clickable.is-selected { background:#fff3d9; border-left:4px solid #c9a961; padding-left:8px }
+
     /* Score picker overlay : scrollable digit picker au clic d'une case */
     .score-picker-overlay {
       position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:200;
@@ -178,12 +186,8 @@
     </div>
 
     <div class="card">
-      <h2 style="margin-top:0">Joueur</h2>
-      <select id="player-select"></select>
-    </div>
-
-    <div class="card">
-      <h2 style="margin-top:0">Carte de score</h2>
+      <h2 style="margin-top:0" id="active-player-title">Carte de score</h2>
+      <p class="muted" id="active-player-hint" style="margin:0 0 10px;font-size:13px">Clique un joueur dans le leaderboard pour selectionner sa carte.</p>
       <div id="scorecard-container"></div>
 
       <div class="scorecard-totals" id="totals">
@@ -304,11 +308,12 @@
       const loopTag = data.game.loop_twice ? ' (2 tours)' : '';
       document.getElementById('formula-name').textContent = `${data.formulaLabel} - ${hcount} trous (par ${data.course.par_total})${loopTag}`;
 
-      const psel = document.getElementById('player-select');
+      // Le joueur selectionne (pour la carte de score) est conserve si possible,
+      // sinon defaut sur le premier de la liste.
       const prev = selectedPlayerId;
-      psel.innerHTML = data.players.map(p => `<option value="${p.id}">${escapeHtml(p.name)}${p.id === me ? ' (moi)' : ''}</option>`).join('');
-      if (prev && data.players.find(p => p.id === prev)) psel.value = String(prev);
-      else if (data.players[0]) { selectedPlayerId = data.players[0].id; psel.value = String(selectedPlayerId); }
+      if (!(prev && data.players.find(p => p.id === prev)) && data.players[0]) {
+        selectedPlayerId = data.players[0].id;
+      }
       if (selectedHole > hcount) selectedHole = 1;
 
       renderLeaderboard(); renderScorecard();
@@ -502,12 +507,13 @@
       </tr></thead><tbody>` + rows.map(r => {
         const meRow = r.playerId === me ? ' me' : '';
         const rank1 = r.rank === 1 ? ' rank-1' : '';
+        const selCls = r.playerId === selectedPlayerId ? ' is-selected' : '';
         const vp = r.vsPar;
         const vpClass = vp == null ? '' : (vp < 0 ? 'under' : (vp > 0 ? 'over' : 'even'));
         const rankCell = r.rank === 1
           ? `<svg class="trophy" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v3a5 5 0 0010 0V4H7zm-3 1v2a3 3 0 003 3v-1a2 2 0 01-2-2V5H4zm14 0v2a2 2 0 01-2 2v1a3 3 0 003-3V5h-1zM10 14h4v2H10v-2zm-2 4h8v2H8v-2z"/></svg>`
           : r.rank;
-        return `<tr class="${meRow}${rank1}">
+        return `<tr class="lb-clickable${meRow}${rank1}${selCls}" data-player-id="${r.playerId}">
           <td class="lb-rank">${rankCell}</td>
           <td>${escapeHtml(r.name)} <span class="muted" style="font-size:12px">(${r.handicap}/${r.playingHcp})</span></td>
           ${isStrokeBoth && lbViewStableford
@@ -519,6 +525,20 @@
           <td class="lb-score">${r.holesPlayed}/${hcount}</td>
         </tr>`;
       }).join('') + '</tbody></table>';
+
+      bindLeaderboardClicks(div);
+    }
+
+    function bindLeaderboardClicks(div) {
+      div.querySelectorAll('[data-player-id]').forEach(el => {
+        el.addEventListener('click', () => {
+          const pid = Number(el.dataset.playerId);
+          if (!pid) return;
+          selectedPlayerId = pid;
+          renderLeaderboard();
+          renderScorecard();
+        });
+      });
     }
 
     document.getElementById('toggle-lb-stableford').addEventListener('click', () => {
@@ -581,10 +601,13 @@
       div.innerHTML = standingsHtml + matchKeys.map(k => {
         const rows = matches[k];
         if (k === '999') {
-          return rows.map(r => `<div class="match-card no-pair">
-            <div class="match-num">Sans adversaire</div>
-            <div class="match-row"><span class="player-name">${escapeHtml(r.name)}${teamBadge(r)}</span><span class="match-score muted">${escapeHtml(r.scoreLabel)}</span></div>
-          </div>`).join('');
+          return rows.map(r => {
+            const selCls = r.playerId === selectedPlayerId ? ' is-selected' : '';
+            return `<div class="match-card no-pair">
+              <div class="match-num">Sans adversaire</div>
+              <div class="match-row lb-clickable${selCls}" data-player-id="${r.playerId}"><span class="player-name">${escapeHtml(r.name)}${teamBadge(r)}</span><span class="match-score muted">${escapeHtml(r.scoreLabel)}</span></div>
+            </div>`;
+          }).join('');
         }
 
         const status = rows[0].matchStatus;
@@ -598,11 +621,12 @@
           ${rows.map(r => {
             const meCls = r.playerId === me ? ' me' : '';
             const leaderCls = r.isLeader ? ' leader' : '';
+            const selCls = r.playerId === selectedPlayerId ? ' is-selected' : '';
             // Couleur de l'equipe sur le label "X up" : applique uniquement si
             // le label n'est pas vide et n'est pas AS (qui reste blanc/neutre).
             const scoreColorCls = isTeam && r.scoreLabel && r.scoreLabel !== 'AS' && r.teamColor
               ? ` team-color-${r.teamColor}` : '';
-            return `<div class="match-row${meCls}${leaderCls}">
+            return `<div class="match-row lb-clickable${meCls}${leaderCls}${selCls}" data-player-id="${r.playerId}">
               <span class="player-name">${r.isLeader ? '<svg class="trophy-mini" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v3a5 5 0 0010 0V4H7zm-3 1v2a3 3 0 003 3v-1a2 2 0 01-2-2V5H4zm14 0v2a2 2 0 01-2 2v1a3 3 0 003-3V5h-1zM10 14h4v2H10v-2zm-2 4h8v2H8v-2z"/></svg> ' : ''}${escapeHtml(r.name)}${teamBadge(r)} <span class="muted" style="font-size:12px">(${r.handicap}/${r.playingHcp})</span></span>
               <span class="match-score${scoreColorCls}">${escapeHtml(r.scoreLabel)}</span>
             </div>`;
@@ -610,11 +634,18 @@
           <div class="match-progress muted">${totalHolesPlayed}/${hcount} trous joués</div>
         </div>`;
       }).join('');
+
+      bindLeaderboardClicks(div);
     }
 
     function renderScorecard() {
       const player = state.players.find(p => p.id === selectedPlayerId);
       if (!player) return;
+      // Met a jour le titre + cache l'invitation a selectionner
+      const titleEl = document.getElementById('active-player-title');
+      const hintEl = document.getElementById('active-player-hint');
+      if (titleEl) titleEl.textContent = `Carte de score — ${player.name}`;
+      if (hintEl)  hintEl.style.display = 'none';
       const playerScores = state.scores[selectedPlayerId] || {};
       const hcount = holesCount();
       // Formules brut-only : pas de coups recus a afficher
@@ -696,10 +727,6 @@
       }
     }
 
-    document.getElementById('player-select').addEventListener('change', e => {
-      selectedPlayerId = Number(e.target.value);
-      renderScorecard();
-    });
     document.getElementById('finish-btn').addEventListener('click', async () => {
       if (!confirm('Terminer la partie pour tout le monde ?')) return;
       await fetch(`/api/games/${state.game.id}/finish`, { method: 'POST', headers: authHeaders() });
