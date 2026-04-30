@@ -44,6 +44,47 @@
     body.lb-fullscreen #toggle-fullscreen,
     body.lb-fullscreen #toggle-lb-stableford { display:none !important }
     body.lb-fullscreen #exit-fullscreen { display:block !important; align-self:flex-start; padding:10px 18px; font-size:15px }
+
+    /* Score picker overlay : scrollable digit picker au clic d'une case */
+    .score-picker-overlay {
+      position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:200;
+      display:flex; align-items:center; justify-content:center;
+    }
+    .score-picker {
+      background:#fff; border-radius:14px; padding:14px;
+      width:200px; max-height:80vh;
+      display:flex; flex-direction:column; box-shadow:0 8px 32px rgba(0,0,0,0.3);
+    }
+    .score-picker .header {
+      text-align:center; font-family:Georgia,serif; font-weight:700;
+      color:#1a4d2e; padding:0 0 10px; border-bottom:2px solid #c9a961;
+      font-size:15px;
+    }
+    .score-picker .header .sub { font-size:12px; color:#6b6b6b; font-weight:400; margin-top:2px }
+    .score-picker-list {
+      overflow-y:auto; flex:1; min-height:200px; max-height:50vh;
+      scroll-snap-type:y mandatory; padding:6px 0;
+      scrollbar-width:thin;
+    }
+    .score-picker-list button {
+      display:block; width:100%; padding:14px 0; font-size:24px; font-weight:700;
+      border:none; background:transparent; cursor:pointer; color:#1a2419;
+      scroll-snap-align:center; transition:background 0.1s;
+      font-family:inherit;
+    }
+    .score-picker-list button:hover { background:#f0e8c8 }
+    .score-picker-list button.active { background:#c9a961; color:#fff }
+    .score-picker .clear {
+      margin-top:8px; padding:10px; border:1px solid #ddd; background:#faf6e9;
+      border-radius:6px; cursor:pointer; font-size:13px; color:#6b2a2a;
+      font-family:inherit;
+    }
+    .score-picker .clear:hover { background:#fff3e0 }
+    .score-picker-help {
+      padding:8px 6px; margin-top:6px; font-size:11px; color:#1a4d2e;
+      background:#faf6e9; border-radius:6px; line-height:1.4; text-align:center;
+    }
+    .score-picker-help .pickup { margin-top:4px; color:#6b2a2a; font-size:11px }
   </style>
 </head>
 <body>
@@ -86,34 +127,8 @@
     </div>
 
     <div class="card">
-      <h2 style="margin-top:0">Saisir un score</h2>
-
-      <label>Joueur</label>
+      <h2 style="margin-top:0">Joueur</h2>
       <select id="player-select"></select>
-
-      <div class="hole-info">
-        <div>
-          <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;opacity:0.7">Trou</div>
-          <span class="h-num" id="hole-num">1</span>
-        </div>
-        <div class="h-meta" style="text-align:right">
-          Par <strong id="hole-par">-</strong> &middot; Difficulté <strong id="hole-si">-</strong><br>
-          <span id="hole-strokes-info" style="font-size:12px"></span>
-        </div>
-      </div>
-
-      <div class="hole-nav">
-        <button class="secondary" id="prev-hole">&larr;</button>
-        <select id="hole-select"></select>
-        <button class="secondary" id="next-hole">&rarr;</button>
-      </div>
-
-      <div class="numpad-wrap">
-        <div class="numpad" id="numpad"></div>
-        <div id="stableford-help" style="display:none"></div>
-      </div>
-
-      <button id="toggle-help" class="secondary" style="margin-top:10px;width:100%">Aide stableford NET</button>
     </div>
 
     <div class="card">
@@ -243,15 +258,9 @@
       psel.innerHTML = data.players.map(p => `<option value="${p.id}">${escapeHtml(p.name)}${p.id === me ? ' (moi)' : ''}</option>`).join('');
       if (prev && data.players.find(p => p.id === prev)) psel.value = String(prev);
       else if (data.players[0]) { selectedPlayerId = data.players[0].id; psel.value = String(selectedPlayerId); }
-
-      const hsel = document.getElementById('hole-select');
-      hsel.innerHTML = data.course.holes.map(h => `<option value="${h.num}">Trou ${h.num} (P${h.par}, Diff. ${h.si})</option>`).join('');
       if (selectedHole > hcount) selectedHole = 1;
-      hsel.value = String(selectedHole);
-      document.getElementById('prev-hole').disabled = selectedHole === 1;
-      document.getElementById('next-hole').disabled = selectedHole === hcount;
 
-      renderHoleInfo(); renderNumpad(); renderStablefordHelp(); renderLeaderboard(); renderScorecard();
+      renderLeaderboard(); renderScorecard();
 
       // Detection fin de partie
       if (data.game.status === 'closed' && !endShown) {
@@ -320,33 +329,66 @@
         </div>`;
     }
 
-    document.getElementById('toggle-help').addEventListener('click', () => {
-      const np = document.getElementById('numpad');
-      const help = document.getElementById('stableford-help');
-      const btn = document.getElementById('toggle-help');
-      const showingHelp = help.style.display !== 'none';
-      if (showingHelp) {
-        help.style.display = 'none';
-        np.style.display = '';
-        btn.textContent = 'Aide stableford NET';
-      } else {
-        help.style.display = '';
-        np.style.display = 'none';
-        btn.textContent = 'Saisir un score';
-      }
-    });
-
-    async function setScore(strokes) {
-      lastSetCell = `${selectedPlayerId}:${selectedHole}`;
+    async function setScore(strokes, holeNum) {
+      const hole = holeNum != null ? holeNum : selectedHole;
+      lastSetCell = `${selectedPlayerId}:${hole}`;
       try { if (navigator.vibrate) navigator.vibrate(35); } catch (e) {}
       await fetch(`/api/games/${state.game.id}/scores`, {
         method: 'POST', headers: {'Content-Type': 'application/json', ...authHeaders()},
-        body: JSON.stringify({ player_id: selectedPlayerId, hole_num: selectedHole, strokes })
+        body: JSON.stringify({ player_id: selectedPlayerId, hole_num: hole, strokes })
       });
-      if (strokes != null && selectedHole < holesCount()) {
-        selectedHole += 1;
-        document.getElementById('hole-select').value = String(selectedHole);
+    }
+
+    // Picker scrollable de score (ouvert au clic d'une case du scorecard)
+    // Affiche aussi l'aide stableford NET contextuelle pour ce trou + ce joueur.
+    function openScorePicker(holeNum) {
+      const cur = (state.scores[selectedPlayerId] || {})[holeNum];
+      const initial = cur != null ? cur : 4;
+      const hole = state.course.holes.find(h => h.num === holeNum);
+      const player = state.players.find(p => p.id === selectedPlayerId);
+      let helpHtml = '';
+      if (hole && player) {
+        const recv = strokesOnHole(player.playingHcp, hole.si);
+        const recvLbl = recv === 0 ? '0' : (recv > 0 ? '+' + recv : String(recv));
+        const parNet = hole.par + recv;
+        const pickupAt = hole.par + 1 + recv;
+        helpHtml = `
+          <div class="score-picker-help">
+            <div>Par <strong>${hole.par}</strong> &middot; recus <strong>${recvLbl}</strong> &middot; par net <strong>${parNet}</strong></div>
+            <div class="pickup">Ramasse a partir de <strong>${pickupAt}</strong> coups (croix)</div>
+          </div>`;
       }
+      const overlay = document.createElement('div');
+      overlay.className = 'score-picker-overlay';
+      const buttons = [];
+      for (let n = 1; n <= 15; n++) {
+        const active = n === initial ? ' active' : '';
+        buttons.push(`<button data-n="${n}" class="${active.trim()}">${n}</button>`);
+      }
+      overlay.innerHTML = `
+        <div class="score-picker">
+          <div class="header">
+            Trou ${holeNum}
+            <div class="sub">${cur != null ? 'Score actuel : ' + cur : 'Choisis le score'}</div>
+          </div>
+          ${helpHtml}
+          <div class="score-picker-list" role="listbox">
+            ${buttons.join('')}
+          </div>
+          <button class="clear" data-clear="1">Effacer le score</button>
+        </div>`;
+      document.body.appendChild(overlay);
+
+      overlay.addEventListener('click', e => {
+        if (e.target === overlay) { overlay.remove(); return; }
+        const n = e.target.dataset && e.target.dataset.n;
+        if (n) { setScore(Number(n), holeNum); overlay.remove(); return; }
+        if (e.target.dataset && e.target.dataset.clear) { setScore(null, holeNum); overlay.remove(); }
+      });
+
+      // Auto-scroll a la valeur active
+      const activeBtn = overlay.querySelector('.score-picker-list button.active');
+      if (activeBtn) activeBtn.scrollIntoView({ block: 'center', behavior: 'instant' });
     }
 
     function isMatchplay() {
@@ -529,11 +571,9 @@
 
       container.querySelectorAll('.scorecard-grid .s').forEach(el => {
         el.addEventListener('click', () => {
-          selectedHole = Number(el.dataset.hole);
-          document.getElementById('hole-select').value = String(selectedHole);
-          renderHoleInfo(); renderNumpad(); renderStablefordHelp(); renderScorecard();
-          document.getElementById('prev-hole').disabled = selectedHole === 1;
-          document.getElementById('next-hole').disabled = selectedHole === holesCount();
+          const holeNum = Number(el.dataset.hole);
+          selectedHole = holeNum;
+          openScorePicker(holeNum);
         });
       });
 
@@ -563,31 +603,7 @@
 
     document.getElementById('player-select').addEventListener('change', e => {
       selectedPlayerId = Number(e.target.value);
-      renderHoleInfo(); renderNumpad(); renderStablefordHelp(); renderScorecard();
-    });
-    document.getElementById('hole-select').addEventListener('change', e => {
-      selectedHole = Number(e.target.value);
-      renderHoleInfo(); renderNumpad(); renderStablefordHelp(); renderScorecard();
-      document.getElementById('prev-hole').disabled = selectedHole === 1;
-      document.getElementById('next-hole').disabled = selectedHole === holesCount();
-    });
-    document.getElementById('prev-hole').addEventListener('click', () => {
-      if (selectedHole > 1) {
-        selectedHole -= 1;
-        document.getElementById('hole-select').value = String(selectedHole);
-        renderHoleInfo(); renderNumpad(); renderStablefordHelp(); renderScorecard();
-        document.getElementById('prev-hole').disabled = selectedHole === 1;
-        document.getElementById('next-hole').disabled = false;
-      }
-    });
-    document.getElementById('next-hole').addEventListener('click', () => {
-      if (selectedHole < holesCount()) {
-        selectedHole += 1;
-        document.getElementById('hole-select').value = String(selectedHole);
-        renderHoleInfo(); renderNumpad(); renderStablefordHelp(); renderScorecard();
-        document.getElementById('prev-hole').disabled = false;
-        document.getElementById('next-hole').disabled = selectedHole === holesCount();
-      }
+      renderScorecard();
     });
     document.getElementById('finish-btn').addEventListener('click', async () => {
       if (!confirm('Terminer la partie pour tout le monde ?')) return;
