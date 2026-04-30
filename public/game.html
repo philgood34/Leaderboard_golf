@@ -96,6 +96,75 @@
     .match-score.team-color-vert  { color:#27ae60; font-weight:700 }
     .match-score.team-color-jaune { color:#b8870c; font-weight:700 }
 
+    /* === Layout Ryder Cup officiel (2 equipes uniquement) === */
+    .ryder-header {
+      display:grid; grid-template-columns:1fr auto 1fr;
+      gap:0; margin-bottom:14px; align-items:stretch;
+    }
+    .ry-team-box {
+      display:flex; align-items:center; justify-content:space-between;
+      padding:14px 18px; color:#fff; font-weight:700;
+      font-family:Georgia,serif;
+    }
+    .ry-team-box.team-rouge { background:#c0392b }
+    .ry-team-box.team-bleu  { background:#2c5aa0 }
+    .ry-team-box.team-vert  { background:#27ae60 }
+    .ry-team-box.team-jaune { background:#d4a017; color:#1a2419 }
+    .ry-team-box.left  { border-radius:6px 0 0 6px }
+    .ry-team-box.right { border-radius:0 6px 6px 0 }
+    .ry-team-name { font-size:16px; text-transform:uppercase; letter-spacing:1px }
+    .ry-team-pts  { font-size:32px }
+    .ry-team-vs   {
+      display:flex; align-items:center; justify-content:center;
+      background:#1a2419; color:#fff; padding:0 14px;
+      font-family:Georgia,serif; font-style:italic; font-size:13px;
+    }
+
+    .ryder-rows {
+      border:1px solid #d4c896; border-radius:4px; overflow:hidden;
+      background:#fff;
+    }
+    .ryder-row {
+      display:grid; grid-template-columns:1fr 44px 1fr;
+      align-items:stretch; min-height:38px;
+      border-bottom:1px solid #efe7c8;
+    }
+    .ryder-row:last-child { border-bottom:none }
+    .ry-side {
+      display:flex; align-items:center; padding:8px 12px;
+      cursor:pointer; gap:12px; transition:background 0.15s;
+      font-family:Georgia,serif;
+    }
+    .ry-side-l { justify-content:flex-start }
+    .ry-side-r { justify-content:flex-end }
+    .ry-side .ry-score { font-weight:700; font-size:14px; min-width:46px; letter-spacing:0.5px }
+    .ry-side-l .ry-score { text-align:left }
+    .ry-side-r .ry-score { text-align:right }
+    .ry-side .ry-name  { font-weight:600; font-size:15px; flex:1 }
+    .ry-side-r .ry-name { text-align:right }
+
+    .ry-side.lit.team-rouge { background:#c0392b; color:#fff }
+    .ry-side.lit.team-bleu  { background:#2c5aa0; color:#fff }
+    .ry-side.lit.team-vert  { background:#27ae60; color:#fff }
+    .ry-side.lit.team-jaune { background:#d4a017; color:#1a2419 }
+    .ry-side:not(.lit):hover { background:#faf6e9 }
+    .ry-side.is-selected { box-shadow:inset 0 0 0 3px #c9a961 }
+    .ry-side.is-selected.lit { box-shadow:inset 0 0 0 3px #fff }
+
+    .ry-hole {
+      display:flex; align-items:center; justify-content:center;
+      background:#1a2419; color:#fff; font-weight:700; font-size:14px;
+      font-family:Georgia,serif;
+    }
+
+    /* Mode plein ecran : amplifie les polices */
+    body.lb-fullscreen .ry-team-name { font-size:24px }
+    body.lb-fullscreen .ry-team-pts  { font-size:54px }
+    body.lb-fullscreen .ry-side .ry-name { font-size:22px }
+    body.lb-fullscreen .ry-side .ry-score { font-size:20px; min-width:60px }
+    body.lb-fullscreen .ry-hole { font-size:20px }
+    body.lb-fullscreen .ryder-row { min-height:54px }
+
     /* Joueur cliquable dans le leaderboard (selectionne sa carte de score) */
     .lb-clickable { cursor:pointer; transition:background 0.15s }
     tr.lb-clickable:hover { background:#faf6e9 }
@@ -455,7 +524,9 @@
     }
 
     function isMatchplay() {
-      return state && state.game && (state.game.formula === 'match_brut' || state.game.formula === 'match_net');
+      if (!state || !state.game) return false;
+      const f = state.game.formula;
+      return f === 'match_brut' || f === 'match_net' || f === 'match_team';
     }
 
     function renderLeaderboard() {
@@ -569,6 +640,11 @@
       const hcount = holesCount();
       const isTeam = state.game.formula === 'match_team';
 
+      // Layout Ryder Cup officiel uniquement quand exactement 2 equipes
+      if (isTeam && state.teams && state.teams.length === 2) {
+        return renderRyderCupLeaderboard(div, lb, matches, matchKeys, hcount);
+      }
+
       // Standings d'equipes : agrege les teamPoints des rows (live)
       let standingsHtml = '';
       if (isTeam) {
@@ -635,6 +711,82 @@
         </div>`;
       }).join('');
 
+      bindLeaderboardClicks(div);
+    }
+
+    // Layout officiel Ryder Cup (2 equipes uniquement)
+    function renderRyderCupLeaderboard(div, lb, matches, matchKeys, hcount) {
+      const team1 = state.teams[0];
+      const team2 = state.teams[1];
+      const fmt = n => Number.isInteger(n) ? String(n) : n.toFixed(1);
+
+      // Totaux d'equipes (live)
+      let pts1 = 0, pts2 = 0;
+      for (const r of lb) {
+        if (r.teamId === team1.id) pts1 += r.teamPoints || 0;
+        if (r.teamId === team2.id) pts2 += r.teamPoints || 0;
+      }
+
+      const headerHtml = `
+        <div class="ryder-header">
+          <div class="ry-team-box team-${team1.color} left">
+            <span class="ry-team-name">${escapeHtml(team1.name)}</span>
+            <span class="ry-team-pts">${fmt(pts1)}</span>
+          </div>
+          <div class="ry-team-vs">vs</div>
+          <div class="ry-team-box team-${team2.color} right">
+            <span class="ry-team-pts">${fmt(pts2)}</span>
+            <span class="ry-team-name">${escapeHtml(team2.name)}</span>
+          </div>
+        </div>`;
+
+      const rowsHtml = matchKeys.map(k => {
+        if (k === '999') return '';
+        const pair = matches[k];
+        const p1 = pair.find(r => r.teamId === team1.id);
+        const p2 = pair.find(r => r.teamId === team2.id);
+        if (!p1 || !p2) return '';
+
+        const status = p1.matchStatus;
+        const closed = status === 'closed' || status === 'final';
+        const holePlayed = Math.max(p1.holesPlayed || 0, p2.holesPlayed || 0);
+        const holeLbl = closed ? 'F' : (holePlayed > 0 ? String(holePlayed) : '-');
+
+        let leftLit = false, rightLit = false;
+        let leftScore = '', rightScore = '';
+        if (status === 'final_AS') {
+          // Match termine sur egalite : TIED
+          leftScore = 'TIED'; rightScore = 'TIED';
+        } else if (status === 'ongoing' && p1.scoreLabel === 'AS') {
+          // Match en cours, egalite provisoire : AS
+          leftScore = 'AS'; rightScore = 'AS';
+        } else if (p1.isLeader) {
+          leftLit = true;
+          leftScore = (p1.scoreLabel || '').toUpperCase();
+        } else if (p2.isLeader) {
+          rightLit = true;
+          rightScore = (p2.scoreLabel || '').toUpperCase();
+        }
+
+        const sel1 = p1.playerId === selectedPlayerId ? ' is-selected' : '';
+        const sel2 = p2.playerId === selectedPlayerId ? ' is-selected' : '';
+        const litL = leftLit ? ` lit team-${team1.color}` : '';
+        const litR = rightLit ? ` lit team-${team2.color}` : '';
+
+        return `<div class="ryder-row" data-match="${k}">
+          <div class="ry-side ry-side-l${litL}${sel1}" data-player-id="${p1.playerId}">
+            <span class="ry-score">${escapeHtml(leftScore)}</span>
+            <span class="ry-name">${escapeHtml(p1.name)}</span>
+          </div>
+          <div class="ry-hole">${holeLbl}</div>
+          <div class="ry-side ry-side-r${litR}${sel2}" data-player-id="${p2.playerId}">
+            <span class="ry-name">${escapeHtml(p2.name)}</span>
+            <span class="ry-score">${escapeHtml(rightScore)}</span>
+          </div>
+        </div>`;
+      }).join('');
+
+      div.innerHTML = headerHtml + '<div class="ryder-rows">' + rowsHtml + '</div>';
       bindLeaderboardClicks(div);
     }
 
