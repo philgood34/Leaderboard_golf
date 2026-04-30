@@ -869,7 +869,9 @@
       // Met a jour le titre + cache l'invitation a selectionner
       const titleEl = document.getElementById('active-player-title');
       const hintEl = document.getElementById('active-player-hint');
-      if (titleEl) titleEl.textContent = `Carte de score — ${player.name}`;
+      if (titleEl) {
+        titleEl.innerHTML = `Carte de score — ${escapeHtml(player.name)} <span class="muted" style="font-size:13px;font-weight:400">(Index ${player.handicap} &middot; HCP de jeu ${player.playingHcp})</span>`;
+      }
       if (hintEl)  hintEl.style.display = 'none';
       const playerScores = state.scores[selectedPlayerId] || {};
       const hcount = holesCount();
