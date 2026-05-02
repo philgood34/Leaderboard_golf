@@ -141,7 +141,7 @@
       background:#fff;
     }
     .ryder-row {
-      display:grid; grid-template-columns:1fr 44px 1fr;
+      display:grid; grid-template-columns:minmax(0,1fr) 44px minmax(0,1fr);
       align-items:stretch; min-height:38px;
       border-bottom:1px solid #efe7c8;
     }
@@ -150,13 +150,18 @@
       display:flex; align-items:center; padding:8px 12px;
       cursor:pointer; gap:12px; transition:background 0.15s;
       font-family:Georgia,serif;
+      min-width:0; overflow:hidden;
     }
     .ry-side-l { justify-content:flex-start }
     .ry-side-r { justify-content:flex-end }
-    .ry-side .ry-score { font-weight:700; font-size:14px; min-width:46px; letter-spacing:0.5px }
+    .ry-side .ry-score { font-weight:700; font-size:14px; min-width:46px; letter-spacing:0.5px; flex-shrink:0 }
     .ry-side-l .ry-score { text-align:left }
     .ry-side-r .ry-score { text-align:right }
-    .ry-side .ry-name  { font-weight:600; font-size:15px; flex:1 }
+    .ry-side .ry-name  {
+      font-weight:600; font-size:15px;
+      flex:1 1 0; min-width:0;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
     .ry-side-r .ry-name { text-align:right }
 
     .ry-side.lit.team-rouge { background:#c0392b; color:#fff }
@@ -187,7 +192,7 @@
       .ry-team-name { font-size:13px; letter-spacing:0.5px }
       .ry-team-pts { font-size:24px }
       .ry-team-vs { padding:0 8px; font-size:11px }
-      .ryder-row { grid-template-columns:1fr 32px 1fr }
+      .ryder-row { grid-template-columns:minmax(0,1fr) 32px minmax(0,1fr) }
       .ry-side { padding:6px 8px; gap:6px }
       .ry-side .ry-score { font-size:11px; min-width:32px; letter-spacing:0 }
       .ry-side .ry-name { font-size:13px }
@@ -196,6 +201,8 @@
     @media (max-width: 360px) {
       .ry-team-name { font-size:11px; letter-spacing:0 }
       .ry-team-pts { font-size:20px }
+      .ryder-row { grid-template-columns:minmax(0,1fr) 28px minmax(0,1fr) }
+      .ry-side { padding:6px 6px; gap:4px }
       .ry-side .ry-score { font-size:10px; min-width:28px }
       .ry-side .ry-name { font-size:12px }
     }
@@ -703,10 +710,12 @@
               <tr><td style="padding:6px 4px">Triple bogey ou pire (+3)</td><td style="text-align:right;padding:6px 4px;font-weight:700;color:#c0392b">-1</td></tr>
             </tbody>
           </table>
-          <div style="margin-top:12px;padding:10px;background:#faf6e9;border-radius:6px;font-size:12px;color:#1a4d2e">
-            <strong>Quota</strong> = 39 - HCP de jeu<br>
-            <strong>Score final</strong> = Total points - Quota<br>
-            Le plus haut total gagne.
+          <div style="margin-top:12px;padding:10px;background:#faf6e9;border-radius:6px;font-size:12px;color:#1a4d2e;line-height:1.5">
+            <strong>Tu pars de :</strong> HCP de jeu − 39<br>
+            À chaque trou, tu ajoutes les points ci-dessus.<br>
+            Le plus haut total gagne.<br><br>
+            <em>Exemple :</em> HCP 10 → tu pars de <strong>−29</strong>.<br>
+            Birdie au trou 1 → −29 + 4 = <strong>−25</strong>.
           </div>
           <button class="clear" data-close="1">Fermer</button>
         </div>`;
@@ -772,14 +781,20 @@
         ? ` <span class="team-badge team-${r.teamColor}">${escapeHtml(r.teamName)}</span>`
         : '';
 
+      // Helper : pour les rows en doubles (isPair) on utilise le 1er id reel et selectedPlayerId match si dans la paire
+      const rowRealId = r => r.pairPlayerIds ? r.pairPlayerIds[0] : r.playerId;
+      const isSelected = r => r.pairPlayerIds
+        ? r.pairPlayerIds.includes(selectedPlayerId)
+        : r.playerId === selectedPlayerId;
+
       div.innerHTML = standingsHtml + matchKeys.map(k => {
         const rows = matches[k];
         if (k === '999') {
           return rows.map(r => {
-            const selCls = r.playerId === selectedPlayerId ? ' is-selected' : '';
+            const selCls = isSelected(r) ? ' is-selected' : '';
             return `<div class="match-card no-pair">
               <div class="match-num">Sans adversaire</div>
-              <div class="match-row lb-clickable${selCls}" data-player-id="${r.playerId}"><span class="player-name">${escapeHtml(r.name)}${teamBadge(r)}</span><span class="match-score muted">${escapeHtml(r.scoreLabel)}</span></div>
+              <div class="match-row lb-clickable${selCls}" data-player-id="${rowRealId(r)}"><span class="player-name">${escapeHtml(r.name)}${teamBadge(r)}</span><span class="match-score muted">${escapeHtml(r.scoreLabel)}</span></div>
             </div>`;
           }).join('');
         }
@@ -793,14 +808,13 @@
         return `<div class="match-card ${statusCls}">
           <div class="match-num">Match ${k}${(status === 'closed' || status === 'final' || status === 'final_AS') ? ' · TERMINÉ' : ''}</div>
           ${rows.map(r => {
-            const meCls = r.playerId === me ? ' me' : '';
+            const realId = rowRealId(r);
+            const meCls = (r.pairPlayerIds ? r.pairPlayerIds.includes(me) : r.playerId === me) ? ' me' : '';
             const leaderCls = r.isLeader ? ' leader' : '';
-            const selCls = r.playerId === selectedPlayerId ? ' is-selected' : '';
-            // Couleur de l'equipe sur le label "X up" : applique uniquement si
-            // le label n'est pas vide et n'est pas AS (qui reste blanc/neutre).
+            const selCls = isSelected(r) ? ' is-selected' : '';
             const scoreColorCls = isTeam && r.scoreLabel && r.scoreLabel !== 'AS' && r.teamColor
               ? ` team-color-${r.teamColor}` : '';
-            return `<div class="match-row lb-clickable${meCls}${leaderCls}${selCls}" data-player-id="${r.playerId}">
+            return `<div class="match-row lb-clickable${meCls}${leaderCls}${selCls}" data-player-id="${realId}">
               <span class="player-name">${r.isLeader ? '<svg class="trophy-mini" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v3a5 5 0 0010 0V4H7zm-3 1v2a3 3 0 003 3v-1a2 2 0 01-2-2V5H4zm14 0v2a2 2 0 01-2 2v1a3 3 0 003-3V5h-1zM10 14h4v2H10v-2zm-2 4h8v2H8v-2z"/></svg> ' : ''}${escapeHtml(r.name)}${teamBadge(r)}</span>
               <span class="match-score${scoreColorCls}">${escapeHtml(r.scoreLabel)}</span>
             </div>`;
@@ -866,18 +880,24 @@
           rightScore = (p2.scoreLabel || '').toUpperCase();
         }
 
-        const sel1 = p1.playerId === selectedPlayerId ? ' is-selected' : '';
-        const sel2 = p2.playerId === selectedPlayerId ? ' is-selected' : '';
+        // En doubles, p1.playerId est "pair:tid:idx" (string) et p1.pairPlayerIds = [id1, id2] reels.
+        // Pour selectedPlayerId on utilise le 1er id reel de la paire.
+        const p1RealId = p1.pairPlayerIds ? p1.pairPlayerIds[0] : p1.playerId;
+        const p2RealId = p2.pairPlayerIds ? p2.pairPlayerIds[0] : p2.playerId;
+        const inPair1 = p1.pairPlayerIds && p1.pairPlayerIds.includes(selectedPlayerId);
+        const inPair2 = p2.pairPlayerIds && p2.pairPlayerIds.includes(selectedPlayerId);
+        const sel1 = (p1.playerId === selectedPlayerId || inPair1) ? ' is-selected' : '';
+        const sel2 = (p2.playerId === selectedPlayerId || inPair2) ? ' is-selected' : '';
         const litL = leftLit ? ` lit team-${team1.color}` : '';
         const litR = rightLit ? ` lit team-${team2.color}` : '';
 
         return `<div class="ryder-row" data-match="${k}">
-          <div class="ry-side ry-side-l${litL}${sel1}" data-player-id="${p1.playerId}">
+          <div class="ry-side ry-side-l${litL}${sel1}" data-player-id="${p1RealId}">
             <span class="ry-score">${escapeHtml(leftScore)}</span>
             <span class="ry-name">${escapeHtml(p1.name)}</span>
           </div>
           <div class="ry-hole">${holeLbl}</div>
-          <div class="ry-side ry-side-r${litR}${sel2}" data-player-id="${p2.playerId}">
+          <div class="ry-side ry-side-r${litR}${sel2}" data-player-id="${p2RealId}">
             <span class="ry-name">${escapeHtml(p2.name)}</span>
             <span class="ry-score">${escapeHtml(rightScore)}</span>
           </div>
@@ -894,8 +914,21 @@
       // Met a jour le titre + cache l'invitation a selectionner
       const titleEl = document.getElementById('active-player-title');
       const hintEl = document.getElementById('active-player-hint');
+      // En doubles : titre "Paire X / Y" et HCP du couple
+      const doublesFormat = state.game && state.game.doubles_format;
+      let displayName = player.name;
+      let displayHcp = `Index ${player.handicap} · HCP de jeu ${player.playingHcp}`;
+      if (doublesFormat && player.team_id && player.pair_index) {
+        const partner = state.players.find(p =>
+          p.id !== player.id && p.team_id === player.team_id && p.pair_index === player.pair_index
+        );
+        if (partner) {
+          displayName = `${player.name} / ${partner.name}`;
+          displayHcp = `Index ${player.handicap}/${partner.handicap}`;
+        }
+      }
       if (titleEl) {
-        titleEl.innerHTML = `Carte de score — ${escapeHtml(player.name)} <span class="muted" style="font-size:13px;font-weight:400">(Index ${player.handicap} &middot; HCP de jeu ${player.playingHcp})</span>`;
+        titleEl.innerHTML = `Carte de score — ${escapeHtml(displayName)} <span class="muted" style="font-size:13px;font-weight:400">(${escapeHtml(displayHcp)})</span>`;
       }
       if (hintEl)  hintEl.style.display = 'none';
       const playerScores = state.scores[selectedPlayerId] || {};
@@ -955,7 +988,10 @@
         });
       });
 
-      const lb = state.leaderboard.find(r => r.playerId === selectedPlayerId);
+      const lb = state.leaderboard.find(r =>
+        r.playerId === selectedPlayerId
+        || (r.pairPlayerIds && r.pairPlayerIds.includes(selectedPlayerId))
+      );
       const grossTotal = Object.values(playerScores).reduce((s, v) => s + v, 0);
       const played = Object.keys(playerScores).length;
       document.getElementById('t-gross').textContent = grossTotal || '-';

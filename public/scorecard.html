@@ -151,7 +151,9 @@
       const holes = d.course.holes;
       const hcount = holes.length;
       const total = Object.values(ps).reduce((s, v) => s + v, 0);
-      const lb = d.leaderboard.find(r => r.playerId === p.id);
+      const lb = d.leaderboard.find(r =>
+        r.playerId === p.id || (r.pairPlayerIds && r.pairPlayerIds.includes(p.id))
+      );
 
       function rowsForRange(from, to) {
         const slice = holes.filter(h => h.num >= from && h.num <= to);

@@ -111,6 +111,18 @@
       <option value="chicago">Chicago</option>
     </select>
 
+    <div id="doubles-format-row" style="display:none; margin-top:12px">
+      <label>Format Ryder</label>
+      <select id="doubles-format-select">
+        <option value="" selected>Singles (1 vs 1)</option>
+        <option value="best_ball">4 balles meilleures balles (2 vs 2)</option>
+        <option value="foursome">Foursome (2 vs 2)</option>
+      </select>
+      <div class="muted" style="font-size:12px;margin-top:4px">
+        En doubles : un seul score saisi par paire, brut uniquement.
+      </div>
+    </div>
+
     <button id="create-btn" class="gold" style="margin-top:18px">Creer la partie</button>
   </div>
 
@@ -153,6 +165,19 @@
       </div>
     </div>
 
+    <!-- Selecteur format doubles (visible apres creation, modifiable tant que setup) -->
+    <div id="doubles-block" style="display:none; margin-bottom:14px">
+      <label>Format Ryder</label>
+      <select id="doubles-format-current">
+        <option value="">Singles (1 vs 1)</option>
+        <option value="best_ball">4 balles meilleures balles (2 vs 2)</option>
+        <option value="foursome">Foursome (2 vs 2)</option>
+      </select>
+      <div class="muted" style="font-size:12px;margin-top:4px">
+        En doubles : un seul score saisi par paire, brut uniquement. Chaque joueur doit recevoir un n° de paire.
+      </div>
+    </div>
+
     <button id="auto-pair-btn" class="secondary" style="display:none;margin-bottom:10px;width:100%">Constituer les matchs automatiquement</button>
     <div id="players-list" style="margin-bottom:14px"></div>
 
@@ -192,6 +217,7 @@
     let gameId = null;
     let gameCode = null;
     let gameFormula = null;
+    let gameDoublesFormat = null; // null | 'best_ball' | 'foursome' (uniquement match_team)
     let courses = [];
     let selectedCourseId = null;
     let currentPlayers = []; // dernier etat des joueurs, utilise pour valider l'unicite du nom
@@ -278,13 +304,22 @@
       }
     }
 
+    // Affiche le selecteur "format doubles" uniquement quand match_team est choisi
+    document.getElementById('formula-select').addEventListener('change', () => {
+      const f = document.getElementById('formula-select').value;
+      document.getElementById('doubles-format-row').style.display = f === 'match_team' ? 'block' : 'none';
+    });
+
     document.getElementById('create-btn').addEventListener('click', async () => {
       if (!selectedCourseId) { alert('Choisis un parcours'); return; }
       const formula = document.getElementById('formula-select').value;
       const loop_twice = document.getElementById('loop-twice').checked ? 1 : 0;
+      const doubles_format = formula === 'match_team'
+        ? (document.getElementById('doubles-format-select').value || null)
+        : null;
       const res = await fetch('/api/games', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ course_id: selectedCourseId, formula, loop_twice })
+        body: JSON.stringify({ course_id: selectedCourseId, formula, loop_twice, doubles_format })
       });
       const data = await res.json();
       if (!res.ok) { alert(data.error || 'Erreur'); return; }
@@ -311,6 +346,7 @@
 
     function showPlayersStep(data) {
       gameFormula = data.game && data.game.formula;
+      gameDoublesFormat = data.game && data.game.doubles_format ? data.game.doubles_format : null;
       const isTeam = gameFormula === 'match_team';
       // S'assure que selectedCourseId pointe sur le parcours de la partie en cours
       if (data.game && data.game.course_id) selectedCourseId = data.game.course_id;
@@ -319,6 +355,8 @@
       document.getElementById('teams-block').style.display = isTeam ? 'block' : 'none';
       document.getElementById('p-team-row').style.display  = isTeam ? 'block' : 'none';
       document.getElementById('auto-pair-btn').style.display = isTeam ? 'block' : 'none';
+      document.getElementById('doubles-block').style.display = isTeam ? 'block' : 'none';
+      document.getElementById('doubles-format-current').value = gameDoublesFormat || '';
       document.getElementById('step-players').style.display = 'block';
       currentTeams = data.teams || [];
       renderTeams(currentTeams);
@@ -327,6 +365,8 @@
       const sock = io();
       sock.emit('join', { gameId, code: gameCode });
       sock.on('game:update', d => {
+        gameDoublesFormat = (d.game && d.game.doubles_format) || null;
+        document.getElementById('doubles-format-current').value = gameDoublesFormat || '';
         currentTeams = d.teams || [];
         renderTeams(currentTeams);
         refreshTeamSelect();
@@ -362,6 +402,13 @@
         return t ? `<span class="team-badge team-${t.color}">${escapeHtml(t.name)}</span>` : '';
       };
       const sexLbl = p => p.sex === 'M' ? 'H' : 'F';
+
+      // Mode DOUBLES : on regroupe par pair_index, on affiche les paires team A vs team B
+      if (gameDoublesFormat) {
+        renderDoublesMatchCards(div, players, findTeam, teamBadge, sexLbl);
+        return;
+      }
+
       const renderPlayerLine = (p, idx, total) => `
         <div class="player-line">
           <span class="pl-pos">${idx + 1}.</span>
@@ -403,7 +450,91 @@
       }
 
       div.innerHTML = html;
+      bindMatchCardActions(div);
+    }
 
+    // Mode doubles : affiche d'abord la liste des joueurs avec selecteur Paire #,
+    // puis le tableau des matchs (paire team A vs paire team B)
+    function renderDoublesMatchCards(div, players, findTeam, teamBadge, sexLbl) {
+      // Determine le nombre max de paires possible : nb joueurs / 4 minimum
+      const totalPlayers = players.length;
+      const maxPair = Math.max(4, Math.ceil(totalPlayers / 2));
+      const pairOpts = (current) => {
+        let opts = '<option value="">—</option>';
+        for (let n = 1; n <= maxPair; n++) {
+          opts += `<option value="${n}"${current === n ? ' selected' : ''}>${n}</option>`;
+        }
+        return opts;
+      };
+
+      let html = '<div style="margin-bottom:10px;font-size:13px;color:#1a4d2e;font-weight:600">Affecte un n° de paire à chaque joueur</div>';
+
+      players.forEach((p, idx) => {
+        html += `<div class="setup-match-card" style="padding:8px 10px;margin-bottom:6px">
+          <div class="player-line" style="border:none;padding:2px 0">
+            <span class="pl-pos">${idx + 1}.</span>
+            <span class="pl-name">${escapeHtml(p.name)}</span>
+            ${teamBadge(p)}
+            <span class="pl-meta">(${sexLbl(p)} &middot; ${p.handicap}/${p.playingHcp})</span>
+            <label style="font-size:11px;color:#1a4d2e;font-weight:600;margin:0 4px 0 8px">Paire :</label>
+            <select class="pair-select" data-pid="${p.id}" style="width:auto;padding:4px 8px;font-size:13px">${pairOpts(p.pair_index)}</select>
+            <span class="pl-actions">
+              <button class="small danger" data-del="${p.id}" title="Retirer">×</button>
+            </span>
+          </div>
+        </div>`;
+      });
+
+      // Recap des matchs de doubles : groupe par pair_index, affiche team A pair vs team B pair
+      const groups = {}; // pairIdx -> { teamId -> [players] }
+      for (const p of players) {
+        if (!p.pair_index || !p.team_id) continue;
+        if (!groups[p.pair_index]) groups[p.pair_index] = {};
+        if (!groups[p.pair_index][p.team_id]) groups[p.pair_index][p.team_id] = [];
+        groups[p.pair_index][p.team_id].push(p);
+      }
+      const pairKeys = Object.keys(groups).map(Number).sort((a, b) => a - b);
+      if (pairKeys.length) {
+        html += `<div style="margin-top:14px;padding:12px;background:#faf6e9;border-radius:6px;border-left:3px solid #c9a961">
+          <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:#1a4d2e;font-weight:700;margin-bottom:8px">Tableau des matchs (doubles)</div>`;
+        for (const idx of pairKeys) {
+          const teamIds = Object.keys(groups[idx]);
+          const sides = teamIds.map(tid => {
+            const arr = groups[idx][tid];
+            const t = findTeam(Number(tid));
+            const names = arr.map(p => escapeHtml(p.name)).join(' / ');
+            const badge = t ? `<span class="team-badge team-${t.color}" style="font-size:10px;padding:1px 6px">${escapeHtml(t.name)}</span>` : '';
+            const warn = arr.length !== 2 ? `<span style="color:#c0392b;font-size:11px"> (${arr.length}/2)</span>` : '';
+            return `${names} ${badge}${warn}`;
+          });
+          const valid = teamIds.length === 2 && teamIds.every(tid => groups[idx][tid].length === 2);
+          html += `<div style="font-size:14px;margin:4px 0;color:#1a2419${valid ? '' : ';color:#c0392b'}">
+            <strong style="color:#1a4d2e">Match ${idx}</strong> &nbsp;${sides.join(' <span class="muted">vs</span> ')}
+          </div>`;
+        }
+        html += '</div>';
+      }
+
+      div.innerHTML = html;
+
+      // Listeners selecteurs pair_index
+      div.querySelectorAll('.pair-select').forEach(sel => {
+        sel.addEventListener('change', async () => {
+          const v = sel.value || null;
+          await fetch(`/api/games/${gameId}/players/${sel.dataset.pid}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ pair_index: v })
+          });
+        });
+      });
+
+      div.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
+        await fetch(`/api/games/${gameId}/players/${b.dataset.del}`, { method: 'DELETE', headers: authHeaders() });
+      }));
+    }
+
+    function bindMatchCardActions(div) {
       div.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
         await fetch(`/api/games/${gameId}/players/${b.dataset.del}`, { method: 'DELETE', headers: authHeaders() });
       }));
@@ -458,8 +589,59 @@
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ order })
       });
+
+      // En doubles : assigne aussi un pair_index
+      // Strategie : a l'interieur de chaque equipe, on regroupe par 2 dans l'ordre
+      // de tri (sexe + index) pour former les paires. Match N = paire N de chaque equipe.
+      if (gameDoublesFormat) {
+        const pairAssignments = []; // [{pid, pairIdx}, ...]
+        for (const tid of teamIds) {
+          const teamPlayers = currentPlayers
+            .filter(p => p.team_id === tid)
+            .sort(sortKey);
+          for (let k = 0; k < teamPlayers.length; k++) {
+            const pairIdx = Math.floor(k / 2) + 1;
+            pairAssignments.push({ pid: teamPlayers[k].id, pairIdx });
+          }
+        }
+        // Send PATCH en sequence (simple, peu de joueurs)
+        for (const a of pairAssignments) {
+          await fetch(`/api/games/${gameId}/players/${a.pid}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ pair_index: a.pairIdx })
+          });
+        }
+      }
     }
     document.getElementById('auto-pair-btn').addEventListener('click', autoPairTeams);
+
+    // Change le format doubles d'une partie en setup
+    document.getElementById('doubles-format-current').addEventListener('change', async () => {
+      const v = document.getElementById('doubles-format-current').value || null;
+      let res;
+      try {
+        res = await fetch(`/api/games/${gameId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ doubles_format: v })
+        });
+      } catch (e) {
+        alert('Erreur reseau : ' + e.message);
+        document.getElementById('doubles-format-current').value = gameDoublesFormat || '';
+        return;
+      }
+      if (!res.ok) {
+        const e = await res.json().catch(() => null);
+        const msg = e && e.error
+          ? e.error
+          : `Erreur changement format (HTTP ${res.status}). Verifie que le serveur Node a ete redemarre.`;
+        alert(msg);
+        document.getElementById('doubles-format-current').value = gameDoublesFormat || '';
+      } else {
+        gameDoublesFormat = v;
+      }
+    });
 
     function refreshTeamSelect() {
       const sel = document.getElementById('p-team');
@@ -774,6 +956,7 @@
 
       // Etape 2 : importer les joueurs
       let added = 0, skipped = 0, errors = [];
+      const isDoubles = isTeam && gameDoublesFormat;
       for (const r of rows) {
         const name = String(r.Nom || r.nom || '').trim();
         if (!name) { skipped++; continue; }
@@ -790,9 +973,20 @@
           team_id = teamIdByName[teamName] || null;
           if (!team_id) { errors.push(`${name} : equipe "${r.Equipe}" introuvable`); continue; }
         }
+        // Colonne "Paire" (nombre) : utile uniquement en mode doubles
+        let pair_index = null;
+        if (isDoubles) {
+          const pRaw = String(r.Paire || r.paire || '').trim();
+          if (pRaw) {
+            const pNum = Number(pRaw);
+            if (Number.isInteger(pNum) && pNum >= 1) pair_index = pNum;
+          }
+        }
+        const body = { name, sex, handicap, tee_color, team_id };
+        if (pair_index != null) body.pair_index = pair_index;
         const res = await fetch(`/api/games/${gameId}/players`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
-          body: JSON.stringify({ name, sex, handicap, tee_color, team_id })
+          body: JSON.stringify(body)
         });
         if (res.ok) { added++; } else {
           const e = await res.json().catch(() => ({}));

@@ -53,6 +53,7 @@ const cols = db.prepare("PRAGMA table_info(games)").all().map(c => c.name);
 if (!cols.includes('code'))       db.exec("ALTER TABLE games ADD COLUMN code TEXT");
 if (!cols.includes('loop_twice')) db.exec("ALTER TABLE games ADD COLUMN loop_twice INTEGER NOT NULL DEFAULT 0");
 if (!cols.includes('closed_at'))  db.exec("ALTER TABLE games ADD COLUMN closed_at TEXT");
+if (!cols.includes('doubles_format')) db.exec("ALTER TABLE games ADD COLUMN doubles_format TEXT");
 
 const playerCols = db.prepare("PRAGMA table_info(players)").all().map(c => c.name);
 if (!playerCols.includes('position')) {
@@ -64,6 +65,9 @@ if (!playerCols.includes('tee_color')) {
 }
 if (!playerCols.includes('team_id')) {
   db.exec("ALTER TABLE players ADD COLUMN team_id INTEGER");
+}
+if (!playerCols.includes('pair_index')) {
+  db.exec("ALTER TABLE players ADD COLUMN pair_index INTEGER");
 }
 
 const courseCols = db.prepare("PRAGMA table_info(courses)").all().map(c => c.name);

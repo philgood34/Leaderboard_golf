@@ -108,7 +108,9 @@ function getGameFull(gameId) {
     playingHcp: playingHandicap(p.handicap, p.slope, p.sss, course.par_total)
   }));
 
-  const leaderboard = computeLeaderboard(course, game.formula, playersWithTee, scoresByPlayer);
+  const leaderboard = computeLeaderboard(course, game.formula, playersWithTee, scoresByPlayer, {
+    doubles_format: game.doubles_format || null
+  });
 
   return {
     game,
@@ -201,19 +203,27 @@ app.get('/api/games/history', (req, res) => {
 
 // Creation de partie (publique, mais cree un code)
 app.post('/api/games', (req, res) => {
-  const { course_id, formula, loop_twice } = req.body;
+  const { course_id, formula, loop_twice, doubles_format } = req.body;
   if (!course_id || !formula) return res.status(400).json({ error: 'course_id et formula requis' });
   const baseCourse = getCourseRow(course_id);
   if (!baseCourse) return res.status(404).json({ error: 'Parcours introuvable' });
   if (!FORMULA_LABELS[formula]) return res.status(400).json({ error: 'Formule inconnue' });
   const lt = loop_twice && baseCourse.holes.length === 9 ? 1 : 0;
+  // doubles_format : uniquement valide pour match_team
+  let df = null;
+  if (doubles_format && formula === 'match_team') {
+    if (!['best_ball', 'foursome'].includes(doubles_format)) {
+      return res.status(400).json({ error: 'doubles_format invalide (best_ball ou foursome)' });
+    }
+    df = doubles_format;
+  }
 
   // Cloturer toutes les parties en cours
   db.prepare(`UPDATE games SET status = 'closed', closed_at = COALESCE(closed_at, CURRENT_TIMESTAMP) WHERE status IN ('setup', 'active')`).run();
 
   const code = genCode();
-  const r = db.prepare(`INSERT INTO games (course_id, formula, status, code, loop_twice) VALUES (?, ?, 'setup', ?, ?)`)
-    .run(course_id, formula, code, lt);
+  const r = db.prepare(`INSERT INTO games (course_id, formula, status, code, loop_twice, doubles_format) VALUES (?, ?, 'setup', ?, ?, ?)`)
+    .run(course_id, formula, code, lt, df);
   // On renvoie code + full state au createur
   const data = getGameFull(r.lastInsertRowid);
   res.json({ ...data, code }); // code visible UNIQUEMENT a la creation (et via game:full ci-dessous)
@@ -245,7 +255,7 @@ app.get('/api/games/:id', requireGameAuth, (req, res) => {
 
 app.post('/api/games/:id/players', requireGameAuth, (req, res) => {
   const gameId = Number(req.params.id);
-  const { name, sex, handicap, tee_color, team_id } = req.body;
+  const { name, sex, handicap, tee_color, team_id, pair_index } = req.body;
   if (!name || !sex || handicap == null) return res.status(400).json({ error: 'name, sex, handicap requis' });
   if (!['M', 'F'].includes(sex)) return res.status(400).json({ error: 'sex doit etre M ou F' });
   const hcp = Number(handicap);
@@ -266,9 +276,16 @@ app.post('/api/games/:id/players', requireGameAuth, (req, res) => {
     teamIdValid = t.id;
   }
 
+  let pairIdxValid = null;
+  if (pair_index != null && pair_index !== '') {
+    const pi = Number(pair_index);
+    if (!Number.isInteger(pi) || pi < 1) return res.status(400).json({ error: 'pair_index invalide' });
+    pairIdxValid = pi;
+  }
+
   const maxPos = db.prepare('SELECT COALESCE(MAX(position), 0) AS m FROM players WHERE game_id = ?').get(gameId).m;
-  const r = db.prepare(`INSERT INTO players (game_id, name, sex, handicap, position, tee_color, team_id) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .run(gameId, trimmed, sex, hcp, maxPos + 1, tee_color || null, teamIdValid);
+  const r = db.prepare(`INSERT INTO players (game_id, name, sex, handicap, position, tee_color, team_id, pair_index) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(gameId, trimmed, sex, hcp, maxPos + 1, tee_color || null, teamIdValid, pairIdxValid);
 
   broadcastGame(gameId);
   res.json({ id: r.lastInsertRowid });
@@ -312,17 +329,53 @@ app.delete('/api/games/:id/teams/:tid', requireGameAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-// Update team_id d'un joueur (pour l'assignation a une equipe sans recreer le joueur)
+// Update team_id et/ou pair_index d'un joueur (sans recreer le joueur)
 app.patch('/api/games/:id/players/:pid', requireGameAuth, (req, res) => {
   const gameId = Number(req.params.id);
   const pid = Number(req.params.pid);
-  const { team_id } = req.body;
-  if (team_id !== null && team_id !== undefined && team_id !== '') {
-    const t = db.prepare('SELECT id FROM teams WHERE id = ? AND game_id = ?').get(Number(team_id), gameId);
-    if (!t) return res.status(400).json({ error: 'Equipe inconnue pour cette partie' });
-    db.prepare('UPDATE players SET team_id = ? WHERE id = ? AND game_id = ?').run(Number(team_id), pid, gameId);
-  } else {
-    db.prepare('UPDATE players SET team_id = NULL WHERE id = ? AND game_id = ?').run(pid, gameId);
+  const { team_id, pair_index } = req.body;
+  if ('team_id' in req.body) {
+    if (team_id !== null && team_id !== undefined && team_id !== '') {
+      const t = db.prepare('SELECT id FROM teams WHERE id = ? AND game_id = ?').get(Number(team_id), gameId);
+      if (!t) return res.status(400).json({ error: 'Equipe inconnue pour cette partie' });
+      db.prepare('UPDATE players SET team_id = ? WHERE id = ? AND game_id = ?').run(Number(team_id), pid, gameId);
+    } else {
+      db.prepare('UPDATE players SET team_id = NULL WHERE id = ? AND game_id = ?').run(pid, gameId);
+    }
+  }
+  if ('pair_index' in req.body) {
+    if (pair_index !== null && pair_index !== undefined && pair_index !== '') {
+      const pi = Number(pair_index);
+      if (!Number.isInteger(pi) || pi < 1) return res.status(400).json({ error: 'pair_index invalide' });
+      db.prepare('UPDATE players SET pair_index = ? WHERE id = ? AND game_id = ?').run(pi, pid, gameId);
+    } else {
+      db.prepare('UPDATE players SET pair_index = NULL WHERE id = ? AND game_id = ?').run(pid, gameId);
+    }
+  }
+  broadcastGame(gameId);
+  res.json({ ok: true });
+});
+
+// Update doubles_format de la partie (uniquement match_team, en setup)
+app.patch('/api/games/:id', requireGameAuth, (req, res) => {
+  const gameId = Number(req.params.id);
+  const game = db.prepare('SELECT * FROM games WHERE id = ?').get(gameId);
+  if (!game) return res.status(404).json({ error: 'Partie introuvable' });
+  if (game.status !== 'setup') return res.status(400).json({ error: 'Partie deja demarree' });
+
+  if ('doubles_format' in req.body) {
+    if (game.formula !== 'match_team') {
+      return res.status(400).json({ error: 'doubles_format reserve a match_team' });
+    }
+    const v = req.body.doubles_format;
+    if (v && !['best_ball', 'foursome'].includes(v)) {
+      return res.status(400).json({ error: 'doubles_format invalide (best_ball ou foursome)' });
+    }
+    db.prepare('UPDATE games SET doubles_format = ? WHERE id = ?').run(v || null, gameId);
+    // Si on revient en singles : reset les pair_index pour cette partie
+    if (!v) {
+      db.prepare('UPDATE players SET pair_index = NULL WHERE game_id = ?').run(gameId);
+    }
   }
   broadcastGame(gameId);
   res.json({ ok: true });
@@ -393,16 +446,49 @@ app.post('/api/games/:id/start', requireGameAuth, (req, res) => {
     if (teamRows.length < 2) return res.status(400).json({ error: 'Match Play par equipes : 2 equipes minimum requises' });
     if (teamRows.length > 4) return res.status(400).json({ error: 'Match Play par equipes : 4 equipes maximum' });
 
-    const playersList = db.prepare('SELECT id, name, team_id FROM players WHERE game_id = ? ORDER BY position, id').all(gameId);
+    const playersList = db.prepare('SELECT id, name, team_id, pair_index FROM players WHERE game_id = ? ORDER BY position, id').all(gameId);
     const unassigned = playersList.filter(p => !p.team_id);
     if (unassigned.length) {
       return res.status(400).json({ error: `${unassigned.length} joueur(s) sans equipe : ${unassigned.map(p => p.name).join(', ')}` });
     }
-    for (let i = 0; i + 1 < playersList.length; i += 2) {
-      if (playersList[i].team_id === playersList[i + 1].team_id) {
-        return res.status(400).json({
-          error: `Match ${(i / 2) + 1} : ${playersList[i].name} et ${playersList[i + 1].name} sont dans la meme equipe (interdit)`
-        });
+
+    if (game.doubles_format) {
+      // Mode doubles : chaque pair_index doit avoir 2 joueurs par equipe presente,
+      // et il faut au moins 2 equipes ayant la meme pair_index
+      const noPair = playersList.filter(p => !p.pair_index);
+      if (noPair.length) {
+        return res.status(400).json({ error: `${noPair.length} joueur(s) sans paire : ${noPair.map(p => p.name).join(', ')}` });
+      }
+      const groups = {}; // "teamId:pairIdx" -> [names]
+      for (const p of playersList) {
+        const k = `${p.team_id}:${p.pair_index}`;
+        if (!groups[k]) groups[k] = [];
+        groups[k].push(p.name);
+      }
+      for (const k in groups) {
+        if (groups[k].length !== 2) {
+          return res.status(400).json({ error: `Paire ${k.split(':')[1]} dans une equipe : ${groups[k].length} joueur(s) au lieu de 2 (${groups[k].join(', ')})` });
+        }
+      }
+      // Au moins 2 equipes par pair_index
+      const byIdx = {}; // pairIdx -> Set(teamId)
+      for (const p of playersList) {
+        if (!byIdx[p.pair_index]) byIdx[p.pair_index] = new Set();
+        byIdx[p.pair_index].add(p.team_id);
+      }
+      for (const idx in byIdx) {
+        if (byIdx[idx].size < 2) {
+          return res.status(400).json({ error: `Paire ${idx} : pas d'adversaire (manque une paire dans une autre equipe)` });
+        }
+      }
+    } else {
+      // Singles classique : appariement par position consecutive cross-team
+      for (let i = 0; i + 1 < playersList.length; i += 2) {
+        if (playersList[i].team_id === playersList[i + 1].team_id) {
+          return res.status(400).json({
+            error: `Match ${(i / 2) + 1} : ${playersList[i].name} et ${playersList[i + 1].name} sont dans la meme equipe (interdit)`
+          });
+        }
       }
     }
   }
@@ -419,15 +505,29 @@ app.post('/api/games/:id/scores', requireGameAuth, (req, res) => {
   const player = db.prepare('SELECT * FROM players WHERE id = ? AND game_id = ?').get(player_id, gameId);
   if (!player) return res.status(404).json({ error: 'Joueur introuvable dans cette partie' });
 
+  // En doubles (Ryder) : on propage le score au partenaire (meme team_id + meme pair_index)
+  const game = db.prepare('SELECT doubles_format, formula FROM games WHERE id = ?').get(gameId);
+  let targetIds = [Number(player_id)];
+  if (game && game.formula === 'match_team' && game.doubles_format && player.team_id && player.pair_index) {
+    const partners = db.prepare(
+      'SELECT id FROM players WHERE game_id = ? AND team_id = ? AND pair_index = ? AND id != ?'
+    ).all(gameId, player.team_id, player.pair_index, player.id);
+    for (const pn of partners) targetIds.push(pn.id);
+  }
+
   if (strokes == null || strokes === '') {
-    db.prepare('DELETE FROM scores WHERE player_id = ? AND hole_num = ?').run(player_id, hole_num);
+    const stmt = db.prepare('DELETE FROM scores WHERE player_id = ? AND hole_num = ?');
+    const tx = db.transaction(() => { for (const id of targetIds) stmt.run(id, hole_num); });
+    tx();
   } else {
     const s = Number(strokes);
     if (!Number.isInteger(s) || s < 1 || s > 20) return res.status(400).json({ error: 'Score invalide (1-20)' });
-    db.prepare(`
+    const stmt = db.prepare(`
       INSERT INTO scores (player_id, hole_num, strokes) VALUES (?, ?, ?)
       ON CONFLICT(player_id, hole_num) DO UPDATE SET strokes = excluded.strokes
-    `).run(player_id, hole_num, s);
+    `);
+    const tx = db.transaction(() => { for (const id of targetIds) stmt.run(id, hole_num, s); });
+    tx();
   }
 
   broadcastGame(gameId);
@@ -470,8 +570,10 @@ function buildCsv(data) {
   lines.push('');
   lines.push(['Rang', 'Joueur', 'Sexe', 'Index', 'HCP de jeu', 'Trous joues', 'Brut', 'Score formule'].map(esc).join(sep));
   for (const r of data.leaderboard) {
-    const player = data.players.find(p => p.id === r.playerId);
-    const grossTotal = Object.values(data.scores[r.playerId] || {}).reduce((s, v) => s + v, 0);
+    // En doubles : r.playerId = "pair:tid:idx", on prend les coups d'un des 2 joueurs
+    const realId = (r.pairPlayerIds && r.pairPlayerIds[0]) || r.playerId;
+    const player = data.players.find(p => p.id === realId);
+    const grossTotal = Object.values(data.scores[realId] || {}).reduce((s, v) => s + v, 0);
     lines.push([
       r.rank,
       r.name,
