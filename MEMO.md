@@ -9,9 +9,9 @@
 
 ## 🎯 De quoi s'agit-il ?
 
-Application web pour suivre les scores d'une partie de golf en direct, avec leaderboard live multi-joueurs. Plusieurs formules : Stroke Play, Matchplay, Chicago. Mobile-first (chacun saisit ses scores sur son téléphone).
+Application web pour suivre les scores d'une partie de golf en direct, avec leaderboard live multi-joueurs. Plusieurs formules : Stroke Play, Matchplay, Chicago, Match Play par équipes (Ryder Cup). Mobile-first (chacun saisit ses scores sur son téléphone).
 
-Code initial développé par **PetitJump** (un ami), récupéré par clé USB, hébergé sur le compte GitHub `philgood34`.
+Hébergée sur le compte GitHub `philgood34`, déployée sur Render.
 
 ---
 
@@ -202,10 +202,14 @@ Largement suffisant (un mois fait 720h). Pas un souci.
 
 ## 🧹 À faire (si pas encore fait)
 
-- [ ] Supprimer le fichier `.env` local (token ngrok de PetitJump dedans)
 - [ ] Supprimer le dossier `node_modules` local pour gagner ~200 Mo (régénérable avec `npm install` si besoin un jour)
-- [ ] Supprimer le repo GitHub `mes_projets` (devenu inutile, GitHub Pages désactivé) — **optionnel**
 - [ ] Mettre l'URL `https://philgood34.fr` en favori du navigateur
+
+### Améliorations sécurité (optionnelles, à voir plus tard)
+
+- [ ] **Rate limiting** sur l'API (ex: `express-rate-limit`, max 100 req/min par IP) pour éviter les abus
+- [ ] **Sanitization** plus stricte des entrées utilisateur (noms de joueurs, équipes, parcours) — actuellement on échappe le HTML à l'affichage mais pas à l'insertion DB
+- [ ] **Helmet.js** pour headers HTTP sécurité (CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy)
 
 ---
 
@@ -232,7 +236,6 @@ Pour les détails complets, lire le fichier **`README.md`**.
 
 ## 📞 Contacts
 
-- **Dev original** : PetitJump (ami, possède le code source initial)
 - **Hébergement** : moi (philgood34)
 
 ---

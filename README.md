@@ -26,16 +26,7 @@ Application web mobile-first pour suivre en direct les scores d'une partie de go
 npm install
 ```
 
-Au premier lancement, la table `courses` est seedee automatiquement avec les 5 parcours de l'Herault.
-
-## Configuration ngrok (optionnelle)
-
-Cree un fichier `.env` a la racine :
-```
-NGROK_API=ton_token_ngrok
-```
-Le serveur ouvrira automatiquement un tunnel ngrok au demarrage et affichera l'URL publique.
-Sans `.env` ou `NGROK_API`, le serveur tourne en local seul.
+Au premier lancement, la table `courses` est seedee automatiquement avec les 11 parcours de l'Herault.
 
 ## Lancer le serveur
 
@@ -46,10 +37,17 @@ npm start
 Sortie attendue :
 ```
 Leaderboard golf en ecoute sur http://localhost:3000
-  Ngrok actif : https://xxxxx.ngrok-free.dev
 ```
 
-Partage l'URL ngrok et le code 4 chiffres genere a la creation de la partie.
+Pour exposer l'app a l'exterieur, deploie-la sur Render (configuration automatique a partir du depot GitHub) ou tout hebergeur Node.js. La version live est sur https://philgood34.fr.
+
+## Variables d'environnement (.env)
+
+Optionnelles. Cree un fichier `.env` a la racine si besoin :
+```
+PORT=3000              # port d'ecoute (defaut 3000)
+FINISH_PIN=2749        # code PIN pour cloturer une partie (defaut 2749)
+```
 
 ## Securite
 
@@ -99,7 +97,7 @@ Interface inspiree d'un club-house : verts profonds (fairway), parchemin (cream)
 ## Flux d'utilisation
 
 1. **Organisateur** ouvre l'URL → "Creer une partie" → choisit parcours et formule → ajoute les joueurs (nom, sexe, index) → "Demarrer la partie"
-2. Chaque **joueur** ouvre l'URL ngrok sur son telephone → "Rejoindre la partie" → choisit son nom dans la liste
+2. Chaque **joueur** ouvre l'URL publique (ex: https://philgood34.fr) sur son telephone → "Rejoindre la partie" → choisit son nom dans la liste
 3. Pendant le tour, n'importe quel joueur peut saisir un score : choisir le joueur, choisir le trou, taper le score sur le pave numerique
 4. Le **leaderboard** se met a jour automatiquement en temps reel sur tous les telephones
 5. A la fin, l'organisateur clique "Terminer" pour cloturer la partie

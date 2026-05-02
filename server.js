@@ -529,18 +529,6 @@ io.on('connection', (socket) => {
 // ---------- Start ----------
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, async () => {
+server.listen(PORT, () => {
   console.log(`Leaderboard golf en ecoute sur http://localhost:${PORT}`);
-  if (process.env.NGROK_API) {
-    try {
-      const ngrok = require('@ngrok/ngrok');
-      const listener = await ngrok.connect({ addr: PORT, authtoken: process.env.NGROK_API });
-      console.log(`\n  Ngrok actif : ${listener.url()}`);
-      console.log(`  Partage cette URL aux joueurs.\n`);
-    } catch (e) {
-      console.warn('Ngrok non demarre :', e.message);
-    }
-  } else {
-    console.log(`Pour exposer via ngrok : place NGROK_API=<token> dans .env`);
-  }
 });

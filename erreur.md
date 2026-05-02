@@ -70,21 +70,13 @@ L'identite "joueur" est juste un `localStorage.me_player_id_<gameId>` cote clien
 
 Quand l'option "Jouer en 18 trous" est cochee sur un 9 trous, le serveur double slope/SSS/par. Pour le par et le SSS c'est mathematiquement exact (jouer 2 fois la meme boucle). Pour le slope, l'approximation est plus grossiere : ffgolf publie un slope qui semble deja partiellement normalise pour 9 trous (Fabregues = 37, tres bas). Doubler donne 74, ce qui rapproche d'un equivalent 18 trous typique mais sans garantie d'etre la valeur officielle FFGolf si le club faisait calibrer le parcours en 18 trous.
 
-### 15. Tunnel ngrok partage le port mais pas le code
-
-`server.js` ouvre automatiquement un tunnel ngrok via `@ngrok/ngrok` si `NGROK_API` est dans `.env`. L'URL publique est affichee dans la console mais N'EST PAS persistee : a chaque redemarrage, nouvelle URL. Pour une URL stable, il faut un domaine reserve sur le compte ngrok payant + passer `domain: "..."` dans `ngrok.connect()`.
-
-### 9. ngrok HTTPS et Socket.IO
-
-Avec ngrok en mode HTTPS (par defaut), Socket.IO doit fonctionner sans config particuliere car le client utilise `io()` (auto-detection). Si on passe en mode ngrok TCP brut (`ngrok tcp 3000`), il faudra ajuster.
-
 ### 10. Encodage Windows / SQLite WAL
 
 `db.pragma('journal_mode = WAL')` cree des fichiers `golf.db-shm` et `golf.db-wal` a cote de `golf.db`. Ils sont normaux. Si on veut sauvegarder/copier la DB, faire un `VACUUM` ou un checkpoint avant.
 
 ### 11. Permissions navigateur sur iOS pour Socket.IO
 
-Sur iOS Safari avec ngrok, parfois la connexion WebSocket prend ~2s a s'etablir (handshake). Le leaderboard se rafraichit alors apres un court delai au premier chargement. Pas de bug, juste un comportement reseau.
+Sur iOS Safari, parfois la connexion WebSocket prend ~2s a s'etablir (handshake). Le leaderboard se rafraichit alors apres un court delai au premier chargement. Pas de bug, juste un comportement reseau.
 
 ## Code / dependances
 

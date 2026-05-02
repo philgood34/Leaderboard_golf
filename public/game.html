@@ -181,6 +181,25 @@
     body.lb-fullscreen .ry-hole { font-size:20px }
     body.lb-fullscreen .ryder-row { min-height:54px }
 
+    /* Mode portrait smartphone : compresse pour eviter le decalage */
+    @media (max-width: 480px) {
+      .ry-team-box { padding:10px 12px; gap:8px }
+      .ry-team-name { font-size:13px; letter-spacing:0.5px }
+      .ry-team-pts { font-size:24px }
+      .ry-team-vs { padding:0 8px; font-size:11px }
+      .ryder-row { grid-template-columns:1fr 32px 1fr }
+      .ry-side { padding:6px 8px; gap:6px }
+      .ry-side .ry-score { font-size:11px; min-width:32px; letter-spacing:0 }
+      .ry-side .ry-name { font-size:13px }
+      .ry-hole { font-size:12px }
+    }
+    @media (max-width: 360px) {
+      .ry-team-name { font-size:11px; letter-spacing:0 }
+      .ry-team-pts { font-size:20px }
+      .ry-side .ry-score { font-size:10px; min-width:28px }
+      .ry-side .ry-name { font-size:12px }
+    }
+
     /* Joueur cliquable dans le leaderboard (selectionne sa carte de score) */
     .lb-clickable { cursor:pointer; transition:background 0.15s }
     tr.lb-clickable:hover { background:#faf6e9 }
@@ -229,6 +248,11 @@
       background:#faf6e9; border-radius:6px; line-height:1.4; text-align:center;
     }
     .score-picker-help .pickup { margin-top:4px; color:#6b2a2a; font-size:11px }
+    .score-picker-help .sb-net-title {
+      font-family:Georgia,serif; font-size:20px; font-weight:700;
+      color:#c9a961; letter-spacing:2px; text-align:center;
+      padding:4px 0 8px; border-bottom:1px solid #d4c896; margin-bottom:6px;
+    }
   </style>
 </head>
 <body>
@@ -502,6 +526,7 @@
           const pickupAt = hole.par + 1 + recv;
           helpHtml = `
             <div class="score-picker-help">
+              <div class="sb-net-title">EN NET</div>
               <div>Par <strong>${hole.par}</strong> &middot; recus <strong>${recvLbl}</strong> &middot; par net <strong>${parNet}</strong></div>
               <div class="pickup">Ramasse a partir de <strong>${pickupAt}</strong> coups si balle non rentree (croix)</div>
             </div>`;
