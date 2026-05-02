@@ -7,6 +7,7 @@
   <meta name="theme-color" content="#1a4d2e">
   <title>Configurer la partie - Leaderboard Golf</title>
   <link rel="stylesheet" href="/style.css">
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
   <style>
     /* Badges couleur equipes */
     .team-badge {
@@ -27,6 +28,38 @@
       background:#fee; color:#c0392b; padding:6px 10px; border-radius:4px;
       font-size:12px; margin-top:6px;
     }
+    /* Modal de selection (sheet picker) — meme style que score-picker dans game.html */
+    .score-picker-overlay {
+      position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:200;
+      display:flex; align-items:center; justify-content:center;
+    }
+    .score-picker {
+      background:#fff; border-radius:14px; padding:14px;
+      width:280px; max-height:80vh;
+      display:flex; flex-direction:column; box-shadow:0 8px 32px rgba(0,0,0,0.3);
+    }
+    .score-picker .header {
+      text-align:center; font-family:Georgia,serif; font-weight:700;
+      color:#1a4d2e; padding:0 0 10px; border-bottom:2px solid #c9a961;
+      font-size:15px;
+    }
+    .score-picker .header .sub { font-size:12px; color:#6b6b6b; font-weight:400; margin-top:2px }
+    .score-picker-list {
+      overflow-y:auto; flex:1; min-height:60px; max-height:50vh;
+      padding:6px 0;
+    }
+    .score-picker-list button {
+      display:block; width:100%; padding:12px; font-size:15px; font-weight:600;
+      border:1px solid #d4c896; background:#faf6e9; cursor:pointer; color:#1a2419;
+      transition:background 0.1s; font-family:inherit; margin-bottom:6px; border-radius:6px;
+    }
+    .score-picker-list button:hover { background:#c9a961; color:#fff }
+    .score-picker .clear {
+      margin-top:8px; padding:10px; border:1px solid #ddd; background:#faf6e9;
+      border-radius:6px; cursor:pointer; font-size:13px; color:#6b2a2a;
+      font-family:inherit;
+    }
+    .score-picker .clear:hover { background:#fff3e0 }
     /* Cards de match (formule match_team) */
     .setup-match-card {
       border:1px solid #d4c896; border-radius:8px; padding:10px 12px;
@@ -93,6 +126,12 @@
 
   <div id="step-players" class="card" style="display:none">
     <h2>Le flight</h2>
+
+    <!-- Import depuis Excel (File System Access API, Chrome desktop) -->
+    <div id="import-block" style="margin-bottom:14px;display:none">
+      <button id="import-btn" class="secondary" style="width:100%">Configurer fichier import Excel</button>
+      <div id="import-status" class="muted" style="font-size:12px;margin-top:6px;text-align:center"></div>
+    </div>
 
     <!-- Section equipes : visible seulement pour match_team -->
     <div id="teams-block" style="display:none; margin-bottom:18px">
@@ -594,6 +633,190 @@
     });
 
     function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);}
+
+    // ===== IMPORT JOUEURS DEPUIS EXCEL (File System Access API + SheetJS) =====
+    // Stocke un handle persistant vers le fichier .xlsx dans IndexedDB.
+    // Marche uniquement sur Chrome / Edge desktop (FSAA).
+    const IDB_NAME = 'leaderboard-golf', IDB_STORE = 'kv';
+    function idbOpen() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(IDB_NAME, 1);
+        req.onupgradeneeded = () => req.result.createObjectStore(IDB_STORE);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+    async function idbGet(key) {
+      const db = await idbOpen();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, 'readonly').objectStore(IDB_STORE).get(key);
+        tx.onsuccess = () => resolve(tx.result);
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+    async function idbSet(key, value) {
+      const db = await idbOpen();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(IDB_STORE, 'readwrite').objectStore(IDB_STORE).put(value, key);
+        tx.onsuccess = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    let importFileHandle = null;
+
+    async function refreshImportButton() {
+      const btn = document.getElementById('import-btn');
+      const status = document.getElementById('import-status');
+      if (!('showOpenFilePicker' in window)) {
+        document.getElementById('import-block').style.display = 'none';
+        return;
+      }
+      document.getElementById('import-block').style.display = 'block';
+      if (importFileHandle) {
+        btn.textContent = `Importer joueurs (${importFileHandle.name})`;
+        status.innerHTML = `Fichier mémorisé. <a href="#" id="reset-import" style="color:#c0392b">Reconfigurer</a>`;
+        document.getElementById('reset-import').addEventListener('click', async e => {
+          e.preventDefault();
+          await idbSet('importFileHandle', null);
+          importFileHandle = null;
+          refreshImportButton();
+        });
+      } else {
+        btn.textContent = 'Configurer fichier import Excel';
+        status.textContent = 'Pointer une fois vers ton joueurs.xlsx, Chrome retient le chemin.';
+      }
+    }
+
+    async function setupImportFile() {
+      try {
+        const [handle] = await window.showOpenFilePicker({
+          types: [{ description: 'Fichier Excel', accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }],
+          multiple: false,
+          startIn: 'desktop'
+        });
+        await idbSet('importFileHandle', handle);
+        importFileHandle = handle;
+        refreshImportButton();
+      } catch (e) {
+        if (e.name !== 'AbortError') alert('Erreur : ' + e.message);
+      }
+    }
+
+    async function importFromFile() {
+      try {
+        const perm = await importFileHandle.queryPermission({ mode: 'read' });
+        if (perm !== 'granted') {
+          const req = await importFileHandle.requestPermission({ mode: 'read' });
+          if (req !== 'granted') { alert('Permission refusee'); return; }
+        }
+        const file = await importFileHandle.getFile();
+        const buffer = await file.arrayBuffer();
+        const wb = XLSX.read(buffer, { type: 'array' });
+        showSheetPicker(wb);
+      } catch (e) {
+        alert('Erreur lecture fichier : ' + e.message);
+      }
+    }
+
+    function showSheetPicker(wb) {
+      const overlay = document.createElement('div');
+      overlay.className = 'score-picker-overlay';
+      overlay.innerHTML = `
+        <div class="score-picker" style="width:280px">
+          <div class="header">Choisir l'onglet<div class="sub">${wb.SheetNames.length} onglets disponibles</div></div>
+          <div class="score-picker-list">
+            ${wb.SheetNames.map(s => `<button data-sheet="${escapeHtml(s)}">${escapeHtml(s)}</button>`).join('')}
+          </div>
+          <button class="clear" data-cancel="1">Annuler</button>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.addEventListener('click', e => {
+        if (e.target === overlay || (e.target.dataset && e.target.dataset.cancel)) { overlay.remove(); return; }
+        const sheetName = e.target.dataset && e.target.dataset.sheet;
+        if (sheetName) { overlay.remove(); processSheet(wb, sheetName); }
+      });
+    }
+
+    async function processSheet(wb, sheetName) {
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: '' });
+      const isTeam = gameFormula === 'match_team';
+      const validColors = ['rouge','bleu','vert','jaune'];
+      const validTees = ['noir','blanc','jaune','bleu','rouge','violet','orange','pp'];
+
+      // Etape 1 : creer les equipes (Ryder uniquement)
+      let teamIdByName = {};
+      if (isTeam) {
+        const seen = {}; // nameKey -> { name, color }
+        for (const r of rows) {
+          const teamName = String(r.Equipe || r.equipe || '').trim();
+          const teamColor = String(r.Couleur || r.couleur || '').trim().toLowerCase();
+          if (!teamName || !teamColor) continue;
+          if (!validColors.includes(teamColor)) continue;
+          const k = teamName.toLowerCase();
+          if (!seen[k]) seen[k] = { name: teamName, color: teamColor };
+        }
+        // Cree celles qui n'existent pas encore
+        for (const k in seen) {
+          const t = seen[k];
+          const existing = currentTeams.find(x => x.name.trim().toLowerCase() === k);
+          if (existing) { teamIdByName[k] = existing.id; continue; }
+          const res = await fetch(`/api/games/${gameId}/teams`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ name: t.name, color: t.color })
+          });
+          if (res.ok) {
+            const j = await res.json();
+            teamIdByName[k] = j.id;
+          }
+        }
+      }
+
+      // Etape 2 : importer les joueurs
+      let added = 0, skipped = 0, errors = [];
+      for (const r of rows) {
+        const name = String(r.Nom || r.nom || '').trim();
+        if (!name) { skipped++; continue; }
+        let sex = String(r.Sexe || r.sexe || '').trim().toUpperCase();
+        if (sex === 'H') sex = 'M';
+        if (sex !== 'M' && sex !== 'F') { errors.push(`${name} : sexe invalide (${sex})`); continue; }
+        const handicap = Number(String(r.Index || r.index || '').replace(',', '.'));
+        if (Number.isNaN(handicap)) { errors.push(`${name} : index invalide`); continue; }
+        let tee_color = String(r.Tee || r.tee || '').trim().toLowerCase() || null;
+        if (tee_color && !validTees.includes(tee_color)) tee_color = null;
+        let team_id = null;
+        if (isTeam) {
+          const teamName = String(r.Equipe || r.equipe || '').trim().toLowerCase();
+          team_id = teamIdByName[teamName] || null;
+          if (!team_id) { errors.push(`${name} : equipe "${r.Equipe}" introuvable`); continue; }
+        }
+        const res = await fetch(`/api/games/${gameId}/players`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ name, sex, handicap, tee_color, team_id })
+        });
+        if (res.ok) { added++; } else {
+          const e = await res.json().catch(() => ({}));
+          if ((e.error || '').includes('deja utilise')) skipped++;
+          else errors.push(`${name} : ${e.error || 'erreur'}`);
+        }
+      }
+      let msg = `Import termine : ${added} joueur(s) ajoute(s)`;
+      if (skipped) msg += `, ${skipped} ignore(s) (doublons / vides)`;
+      if (errors.length) msg += `\n\nErreurs :\n` + errors.slice(0, 10).join('\n') + (errors.length > 10 ? `\n... +${errors.length - 10} autres` : '');
+      alert(msg);
+    }
+
+    document.getElementById('import-btn').addEventListener('click', async () => {
+      if (!importFileHandle) { await setupImportFile(); }
+      else { await importFromFile(); }
+    });
+
+    // Restore handle au chargement
+    (async () => {
+      try { importFileHandle = (await idbGet('importFileHandle')) || null; }
+      catch (e) { importFileHandle = null; }
+      refreshImportButton();
+    })();
 
     loadCourses().then(checkExisting);
   </script>
