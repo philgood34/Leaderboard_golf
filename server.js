@@ -149,6 +149,41 @@ function requireGameAuth(req, res, next) {
   next();
 }
 
+// ---------- Proxy Claude (pour l'app ASSISTANT mobile) ----------
+// Garde la cle Anthropic cote serveur. Le mobile envoie un X-App-Token partage.
+
+const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
+
+app.post('/api/claude', async (req, res) => {
+  const expectedToken = process.env.APP_TOKEN;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!expectedToken || !apiKey) {
+    return res.status(500).json({ error: 'Proxy non configure (APP_TOKEN ou ANTHROPIC_API_KEY manquant cote serveur)' });
+  }
+  const provided = req.header('x-app-token');
+  if (!provided || provided !== expectedToken) {
+    return res.status(401).json({ error: 'Token invalide' });
+  }
+  try {
+    const upstream = await fetch(ANTHROPIC_API_URL, {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(req.body),
+    });
+    const text = await upstream.text();
+    res.status(upstream.status);
+    res.set('content-type', upstream.headers.get('content-type') || 'application/json');
+    res.send(text);
+  } catch (err) {
+    console.error('Proxy Claude error:', err);
+    res.status(502).json({ error: 'Proxy upstream error', message: err && err.message });
+  }
+});
+
 // ---------- API publiques ----------
 
 app.get('/api/courses', (req, res) => {
