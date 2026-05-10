@@ -2,6 +2,8 @@ require('dotenv').config();
 
 const path = require('path');
 const express = require('express');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const http = require('http');
 const { Server } = require('socket.io');
 
@@ -16,6 +18,34 @@ if (courseCount === 0) seed();
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
+
+// Render se trouve derriere un proxy : on lui fait confiance pour recuperer la vraie IP client
+// (necessaire pour que le rate-limiting compte par IP reelle et non par celle du proxy).
+app.set('trust proxy', 1);
+
+// Headers de securite (HSTS, X-Frame-Options, X-Content-Type-Options, etc.).
+// CSP desactive pour ne pas casser le frontend statique dans /public.
+app.use(helmet({ contentSecurityPolicy: false }));
+
+// Rate limit global : 100 req/min/IP, applique a toutes les routes.
+const globalLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 100,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Trop de requetes, ralentissez.' },
+});
+app.use(globalLimiter);
+
+// Rate limit specifique /api/claude (plus strict) : 30 req/min/IP.
+// Si APP_TOKEN fuit, ca limite l'attaquant a ~$X/heure sur Anthropic.
+const claudeLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Trop de requetes Claude, ralentissez.' },
+});
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -154,7 +184,7 @@ function requireGameAuth(req, res, next) {
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 
-app.post('/api/claude', async (req, res) => {
+app.post('/api/claude', claudeLimiter, async (req, res) => {
   const expectedToken = process.env.APP_TOKEN;
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!expectedToken || !apiKey) {
