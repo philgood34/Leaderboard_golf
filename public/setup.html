@@ -453,10 +453,10 @@
       bindMatchCardActions(div);
     }
 
-    // Mode doubles : affiche d'abord la liste des joueurs avec selecteur Paire #,
-    // puis le tableau des matchs (paire team A vs paire team B)
+    // Mode doubles : groupe les joueurs par equipe, tries par pair_index.
+    // Fleches ↑↓ swappent le pair_index entre 2 voisins dans la meme equipe
+    // (= echange de paire). Selecteur Paire dispo aussi pour edition directe.
     function renderDoublesMatchCards(div, players, findTeam, teamBadge, sexLbl) {
-      // Determine le nombre max de paires possible : nb joueurs / 4 minimum
       const totalPlayers = players.length;
       const maxPair = Math.max(4, Math.ceil(totalPlayers / 2));
       const pairOpts = (current) => {
@@ -467,23 +467,48 @@
         return opts;
       };
 
-      let html = '<div style="margin-bottom:10px;font-size:13px;color:#1a4d2e;font-weight:600">Affecte un n° de paire à chaque joueur</div>';
+      // Groupe par equipe + tri par pair_index (nuls a la fin)
+      const sortInTeam = (a, b) => {
+        const ai = a.pair_index || 999, bi = b.pair_index || 999;
+        if (ai !== bi) return ai - bi;
+        return (a.position || 0) - (b.position || 0);
+      };
+      const byTeam = new Map();
+      for (const p of players) {
+        const k = p.team_id || 0;
+        if (!byTeam.has(k)) byTeam.set(k, []);
+        byTeam.get(k).push(p);
+      }
+      for (const [, arr] of byTeam) arr.sort(sortInTeam);
 
-      players.forEach((p, idx) => {
-        html += `<div class="setup-match-card" style="padding:8px 10px;margin-bottom:6px">
-          <div class="player-line" style="border:none;padding:2px 0">
-            <span class="pl-pos">${idx + 1}.</span>
-            <span class="pl-name">${escapeHtml(p.name)}</span>
-            ${teamBadge(p)}
-            <span class="pl-meta">(${sexLbl(p)} &middot; ${p.handicap}/${p.playingHcp})</span>
-            <label style="font-size:11px;color:#1a4d2e;font-weight:600;margin:0 4px 0 8px">Paire :</label>
-            <select class="pair-select" data-pid="${p.id}" style="width:auto;padding:4px 8px;font-size:13px">${pairOpts(p.pair_index)}</select>
-            <span class="pl-actions">
-              <button class="small danger" data-del="${p.id}" title="Retirer">×</button>
-            </span>
-          </div>
-        </div>`;
-      });
+      let html = '<div style="margin-bottom:10px;font-size:13px;color:#1a4d2e;font-weight:600">Utilise les flèches ↑↓ pour échanger les paires d\'une même équipe.</div>';
+
+      for (const [tid, arr] of byTeam) {
+        const team = findTeam(tid);
+        if (team) {
+          html += `<div style="margin-top:14px;margin-bottom:6px"><span class="team-badge team-${team.color}">${escapeHtml(team.name)}</span></div>`;
+        } else if (tid === 0) {
+          html += `<div style="margin-top:14px;margin-bottom:6px;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:#c0392b;font-weight:700">Sans équipe</div>`;
+        }
+        arr.forEach((p, idx) => {
+          const canUp = idx > 0;
+          const canDown = idx < arr.length - 1;
+          html += `<div class="setup-match-card" style="padding:8px 10px;margin-bottom:6px">
+            <div class="player-line" style="border:none;padding:2px 0">
+              <span class="pl-pos">${idx + 1}.</span>
+              <span class="pl-name">${escapeHtml(p.name)}</span>
+              <span class="pl-meta">(${sexLbl(p)} &middot; ${p.handicap}/${p.playingHcp})</span>
+              <label style="font-size:11px;color:#1a4d2e;font-weight:600;margin:0 4px 0 8px">Paire :</label>
+              <select class="pair-select" data-pid="${p.id}" style="width:auto;padding:4px 8px;font-size:13px">${pairOpts(p.pair_index)}</select>
+              <span class="pl-actions">
+                ${canUp ? `<button class="small secondary" data-pair-swap="up" data-pid="${p.id}" data-tid="${tid}" title="Monter (échanger paire)">↑</button>` : '<span style="display:inline-block;width:30px"></span>'}
+                ${canDown ? `<button class="small secondary" data-pair-swap="down" data-pid="${p.id}" data-tid="${tid}" title="Descendre (échanger paire)">↓</button>` : '<span style="display:inline-block;width:30px"></span>'}
+                <button class="small danger" data-del="${p.id}" title="Retirer">×</button>
+              </span>
+            </div>
+          </div>`;
+        });
+      }
 
       // Recap des matchs de doubles : groupe par pair_index, affiche team A pair vs team B pair
       const groups = {}; // pairIdx -> { teamId -> [players] }
@@ -526,6 +551,35 @@
             headers: { 'Content-Type': 'application/json', ...authHeaders() },
             body: JSON.stringify({ pair_index: v })
           });
+        });
+      });
+
+      // Listeners fleches ↑↓ : swap pair_index avec le voisin dans la meme equipe
+      div.querySelectorAll('[data-pair-swap]').forEach(b => {
+        b.addEventListener('click', async () => {
+          const pid = Number(b.dataset.pid);
+          const tid = Number(b.dataset.tid);
+          const direction = b.dataset.pairSwap;
+          const teamPlayers = currentPlayers
+            .filter(p => (p.team_id || 0) === tid)
+            .sort(sortInTeam);
+          const idx = teamPlayers.findIndex(p => p.id === pid);
+          const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+          if (idx < 0 || targetIdx < 0 || targetIdx >= teamPlayers.length) return;
+          const me = teamPlayers[idx], other = teamPlayers[targetIdx];
+          // Echange direct des pair_index. Si pair_index identiques, no-op fonctionnel.
+          await Promise.all([
+            fetch(`/api/games/${gameId}/players/${me.id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', ...authHeaders() },
+              body: JSON.stringify({ pair_index: other.pair_index ?? null })
+            }),
+            fetch(`/api/games/${gameId}/players/${other.id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json', ...authHeaders() },
+              body: JSON.stringify({ pair_index: me.pair_index ?? null })
+            })
+          ]);
         });
       });
 
