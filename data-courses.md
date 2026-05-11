@@ -1,4 +1,4 @@
-# Données slope/SSS par tee et par sexe — 11 parcours
+# Données slope/SSS par tee et par sexe — 12 parcours
 
 > Source principale : [des-balles-et-des-birdies.com](https://www.des-balles-et-des-birdies.com/parcoursdepartement/34) (calcul carte de score)
 > Date de collecte : 29 avril 2026
@@ -87,7 +87,7 @@
 
 ---
 
-## 9 trous (4 parcours)
+## 9 trous (5 parcours)
 
 ### 8. Lamalou-les-Bains (Lamalou-les-Bains) — par 70
 | Tee     | H slope | H SSS | F slope | F SSS |
@@ -98,7 +98,20 @@
 | Bleu    | 115     | 64.1  | 129     | 68.0  |
 | Rouge   | 111     | 62.2  | 117     | 65.8  |
 
-### 9. Fabrègues Compact (Fabrègues) — par 27
+### 9. Coulondres — Pic Saint-Loup (Saint-Gély-du-Fesc) — 9T par 37 (joué en 18T = par 74)
+| Tee     | H slope | H SSS | F slope | F SSS |
+|---------|---------|-------|---------|-------|
+| Blanc   | 146     | 77.1  | —       | —     |
+| Jaune   | 140     | 75.6  | 154     | 81.0  |
+| Bleu    | 136     | 73.8  | 149     | 78.8  |
+| Rouge   | 133     | 72.0  | 139     | 77.3  |
+
+> ✅ Source officielle (PDF + JPG H/F dans `SLOPES/`).
+> Distance Blancs : 3089m × 2 = 6178m. Trous joués 2 fois consécutivement (1,1,2,2,…,9,9), pas 1-9 puis 1-9.
+> Stockage seed : valeurs /2 (cf. Lamalou) ; loop_twice = ON par défaut (toujours joué en 18T en pratique).
+> Tee défaut F = **Rouge** (les Femmes ne jouent pas du Blanc).
+
+### 10. Fabrègues Compact (Fabrègues) — par 27
 | Tee   | H slope | H SSS | F slope | F SSS |
 |-------|---------|-------|---------|-------|
 | Rouge | 36.5    | 27.5  | 36.5    | 27.5  |
@@ -108,7 +121,7 @@
 > "Rouge" = repères standards H et F sur le compact. "P&P" (Pitch & Putt) = repères réservés aux F sur le compact ou prise d'index (H/F sans distinction).
 > Code FFGolf : **2554**.
 
-### 10. Massane — L'Écureuil (Baillargues) — par 27 ❓
+### 11. Massane — L'Écureuil (Baillargues) — par 27 ❓
 | Tee     | H slope | H SSS | F slope | F SSS |
 |---------|---------|-------|---------|-------|
 | Jaune   | ?       | ?     | ?       | ?     |
@@ -117,7 +130,7 @@
 > ⚠️ Sur DBDB un parcours "Les Hérons" 9T existe à Massane avec données placeholder 54/54/54 (probablement non étalonné).
 > Seed actuel utilise slope=40 / sss=24, origine inconnue.
 
-### 11. Fontcaude — Executive (Juvignac) — par 28 ❓
+### 12. Fontcaude — Executive (Juvignac) — par 28 ❓
 | Tee     | H slope | H SSS | F slope | F SSS |
 |---------|---------|-------|---------|-------|
 | Jaune   | ?       | ?     | ?       | ?     |
@@ -142,6 +155,7 @@ Le seed actuel utilise **les valeurs des tees les plus durs** (Noir/Blanc champi
 | Béziers Saint-Thomas  | 140 / 73.1       | Noir H = Blanc H           | 135 / 70.6                   |
 | Pic Saint-Loup Puech  | 150 / 70.6       | Blanc H                    | 133 / 67.4                   |
 | Lamalou               | 66 / 33.8        | Inconnu (DBDB donne 132)   | (120 / 66.3)                 |
+| Coulondres            | 73 / 38.6        | Blanc M en 9T (=146/2)     | 70 / 37.8                    |
 | Fabrègues             | 37 / 27.5        | Inconnu                    | ?                            |
 | Massane Écureuil      | 40 / 24.0        | Inconnu                    | ?                            |
 | Fontcaude Executive   | 40 / 25.0        | Inconnu                    | ?                            |

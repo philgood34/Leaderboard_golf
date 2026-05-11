@@ -232,6 +232,28 @@ const COURSES = [
     ]
   },
   {
+    name: "Coulondres (Pic Saint-Loup)",
+    city: "Saint-Gely-du-Fesc",
+    holes_count: 9,
+    slope: 73, sss: 38.6, // fallback ~ Blanc M en 9T (= 146/2 / 77.1/2)
+    // Valeurs officielles publiees en 18T (le 9T se joue 2 fois) : on /2 pour stockage 9T brut.
+    // Le serveur double automatiquement via loop_twice (cf. getEffectiveCourse).
+    tees: [
+      { sex: 'M', color: 'blanc', slope: 73,   sss: 38.6 },
+      { sex: 'M', color: 'jaune', slope: 70,   sss: 37.8 },
+      { sex: 'M', color: 'bleu',  slope: 68,   sss: 36.9 },
+      { sex: 'M', color: 'rouge', slope: 66.5, sss: 36.0 },
+      { sex: 'F', color: 'jaune', slope: 77,   sss: 40.5 },
+      { sex: 'F', color: 'bleu',  slope: 74.5, sss: 39.4 },
+      { sex: 'F', color: 'rouge', slope: 69.5, sss: 38.7 }
+    ],
+    holes: [
+      { num: 1, par: 4, si: 1 }, { num: 2, par: 5, si: 9 }, { num: 3, par: 3, si: 4 },
+      { num: 4, par: 5, si: 2 }, { num: 5, par: 4, si: 3 }, { num: 6, par: 3, si: 6 },
+      { num: 7, par: 5, si: 5 }, { num: 8, par: 3, si: 8 }, { num: 9, par: 5, si: 7 }
+    ]
+  },
+  {
     name: "Massane - L'Ecureuil (compact)",
     city: "Baillargues",
     holes_count: 9,
